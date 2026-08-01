@@ -17,12 +17,27 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.4</string>
+    <string>2.0</string>
     <key>CFBundleVersion</key>
-    <string>5</string>
+    <string>6</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>cn.local.YouTubeNativeDownloader</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>ytlocal</string>
+            </array>
+        </dict>
+    </array>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
+    <key>NSSupportsLiveActivities</key>
+    <true/>
+    <key>NSSupportsLiveActivitiesFrequentUpdates</key>
     <true/>
     <key>UIApplicationSceneManifest</key>
     <dict>

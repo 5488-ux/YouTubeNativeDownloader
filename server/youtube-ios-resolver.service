@@ -1,0 +1,24 @@
+[Unit]
+Description=YouTube iOS resolver and media relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www
+Group=www
+WorkingDirectory=/opt/youtube-ios-resolver
+ExecStart=/usr/bin/node /opt/youtube-ios-resolver/ios-resolver.mjs
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+Environment=HOME=/tmp
+Environment=DENO_DIR=/tmp/deno
+ReadOnlyPaths=/www/wwwroot/youtube.789113.cn/storage/cookies.txt /opt/ytdlp-php /usr/local/bin/deno
+ReadWritePaths=/var/lib/youtube-ios-resolver
+
+[Install]
+WantedBy=multi-user.target

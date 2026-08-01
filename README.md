@@ -1,19 +1,35 @@
 # 本地下载器 iOS
 
-这是一个纯原生 SwiftUI 工程
+原生 SwiftUI YouTube 下载器，支持 iOS 16.1–26。解析由服务器上的 `yt-dlp` 完成，下载、进度展示和音视频合并由 iPhone 处理。
 
-解析由 iPhone 内的 [YouTubeKit](https://github.com/b5i/YouTubeKit) 完成；视频和音频由手机直接下载，再使用 AVFoundation 在本机无损封装成 MP4。
+## 2.0 功能
 
-## 功能
+- 标准 YouTube、`youtu.be`、Shorts、Embed 和 Live 链接。
+- H.264 视频 + AAC 音频，避免 MP4 白屏只有声音。
+- 最佳画质、1080P、720P、480P；视频 MP4 和音频 M4A。
+- 系统后台 `URLSession`，切到后台或锁屏后继续传输。
+- 实时下载速度、已下载大小和预计剩余时间。
+- Live Activity：锁屏进度和支持机型的灵动岛进度。
+- 下载成功/失败本地通知。
+- 设置页、更新日志和 GitHub 跳转。
+- 不再内置浏览器，不在 App 内保存 YouTube Cookie。
 
-- 支持标准 YouTube、`youtu.be`、Shorts、Embed 和 Live 链接。
-- 视频固定选择 iPhone 兼容的 H.264，音频固定选择 AAC，避免 MP4 白屏只有声音。
-- 支持最佳兼容、1080P、720P、480P。
-- 支持视频 MP4 和音频 M4A。
-- 下载完成后可保存到“照片”或“文件”。
-- App 文稿目录可通过 iPhone“文件”App访问。
+## 解析接口
 
-## 食用方法
+默认接口：`https://youtube.789113.cn/ios-api/resolve`
 
-- 使用自己的p12证书打包或爱思助手
-- 789113.cn
+服务端源码在 `server/`：
+
+- `ios-resolver.mjs`：yt-dlp 解析和带 Range 支持的媒体中转。
+- `youtube-ios-resolver.service`：systemd 服务。
+- `youtube-ios-resolver.nginx.conf`：Nginx 路由。
+
+App 设置中可以修改解析接口地址。服务端下载令牌默认六小时失效，不永久保存视频。
+
+## Codemagic 无 Xcode 打包
+
+仓库根目录已有 `codemagic.yaml`。推送 `main` 后运行 `iOS Unsigned IPA` workflow，产物为：
+
+`build/ios/ipa/YouTubeNativeDownloader-unsigned.ipa`
+
+这是未签名 IPA，需要使用你自己的证书或签名工具签名。IPA 内包含 Live Activity 扩展，签名时主 App 和 `.appex` 必须同时签名。

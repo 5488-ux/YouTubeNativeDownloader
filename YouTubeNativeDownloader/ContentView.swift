@@ -1,17 +1,19 @@
 import SwiftUI
 import UIKit
-import WebKit
 
 struct ContentView: View {
     @StateObject private var model = DownloadViewModel()
     @State private var shareItem: ShareItem?
-    @State private var showingCookieSettings = false
+    @State private var showingSettings = false
 
     var body: some View {
         NavigationStack {
             ZStack {
                 LinearGradient(
-                    colors: [Color(red: 0.91, green: 0.97, blue: 1.0), Color(red: 0.83, green: 0.89, blue: 1.0)],
+                    colors: [
+                        Color(red: 0.91, green: 0.97, blue: 1.0),
+                        Color(red: 0.83, green: 0.89, blue: 1.0)
+                    ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -31,8 +33,8 @@ struct ContentView: View {
             .sheet(item: $shareItem) { item in
                 ShareSheet(fileURL: item.fileURL)
             }
-            .sheet(isPresented: $showingCookieSettings) {
-                CookieSettingsView(model: model)
+            .sheet(isPresented: $showingSettings) {
+                SettingsView(model: model)
             }
             .alert("下载失败", isPresented: Binding(
                 get: { model.errorText != nil },
@@ -58,11 +60,21 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("本地下载器")
                     .font(.system(size: 27, weight: .bold, design: .rounded))
-                Text("手机直连 YouTube · 不经过你的服务器")
+                Text("服务器解析 · 手机后台高速下载")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Button {
+                showingSettings = true
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.title3)
+                    .frame(width: 42, height: 42)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("设置")
         }
         .padding(.top, 8)
     }
@@ -107,23 +119,6 @@ struct ContentView: View {
                 .background(.white.opacity(0.66), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
 
-            Button {
-                showingCookieSettings = true
-            } label: {
-                HStack {
-                    Label("YouTube Cookie", systemImage: "key.fill")
-                    Spacer()
-                    Text(model.hasCookie ? "已保存" : "未设置")
-                        .foregroundStyle(model.hasCookie ? Color.green : Color.secondary)
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(14)
-                .background(.white.opacity(0.66), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            }
-            .buttonStyle(.plain)
-
             Button(action: model.start) {
                 HStack {
                     if model.isBusy {
@@ -145,7 +140,7 @@ struct ContentView: View {
     }
 
     private var progressCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("任务状态").font(.headline)
                 Spacer()
@@ -159,6 +154,14 @@ struct ContentView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
+            HStack(spacing: 10) {
+                metric(title: "速度", value: model.speedText, icon: "speedometer")
+                metric(title: "时间", value: model.etaText, icon: "clock")
+            }
+            Text(model.transferredText)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.tertiary)
+
             if let file = model.latestFile {
                 Button {
                     shareItem = ShareItem(fileURL: file)
@@ -171,6 +174,24 @@ struct ContentView: View {
             }
         }
         .glassCard()
+    }
+
+    private func metric(title: String, value: String, icon: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.caption2).foregroundStyle(.secondary)
+                Text(value)
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity)
+        .background(.white.opacity(0.5), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 
     private var filesCard: some View {
@@ -195,8 +216,8 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                    .padding(.vertical, 20)
-                    .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+                .frame(maxWidth: .infinity)
             } else {
                 ForEach(model.savedFiles, id: \.self) { file in
                     HStack(spacing: 10) {
@@ -228,60 +249,49 @@ struct ContentView: View {
     }
 }
 
-private struct CookieSettingsView: View {
+private struct SettingsView: View {
     @ObservedObject var model: DownloadViewModel
     @Environment(\.dismiss) private var dismiss
-    @State private var showingYouTubeBrowser = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    Button {
-                        showingYouTubeBrowser = true
-                    } label: {
-                        Label("打开内置浏览器登录", systemImage: "safari")
-                    }
+                Section("下载") {
+                    Toggle("允许蜂窝网络下载", isOn: $model.allowsCellular)
+                    Toggle("下载完成通知", isOn: $model.notificationsEnabled)
+                    Toggle("灵动岛与锁屏进度", isOn: $model.liveActivityEnabled)
+                }
 
-                    SecureField("粘贴完整 Cookie 字符串", text: $model.cookieText)
+                Section {
+                    TextField("解析接口", text: $model.serverURL, axis: .vertical)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-
-                    Button("从剪贴板粘贴") {
-                        model.cookieText = UIPasteboard.general.string ?? ""
-                    }
-
-                    Button("保存到本机 Keychain") {
-                        model.saveCookie()
-                    }
-                    .disabled(model.cookieText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                    if model.hasCookie {
-                        Button("清除 Cookie", role: .destructive) {
-                            model.clearCookie()
-                            WKWebsiteDataStore.default().removeData(
-                                ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
-                                modifiedSince: .distantPast
-                            ) { }
-                        }
-                    }
+                        .keyboardType(.URL)
+                    Button("恢复默认接口") { model.resetServerURL() }
                 } header: {
-                    Text("YouTube Cookie")
+                    Text("解析服务器")
                 } footer: {
-                    Text(model.cookieMessage)
+                    Text("服务器负责 yt-dlp 解析和媒体中转；文件最终保存在本机。")
                 }
 
-                Section {
-                    Text("SAPISID")
-                    Text("__Secure-1PAPISID")
-                    Text("__Secure-1PSID")
-                } header: {
-                    Text("需要的字段")
-                } footer: {
-                    Text("只使用你自己的 YouTube Cookie。Cookie 相当于登录凭证，过期后需要重新粘贴。")
+                Section("关于") {
+                    Link(destination: URL(string: "https://github.com/5488-ux/YouTubeNativeDownloader")!) {
+                        Label("打开 GitHub", systemImage: "link")
+                    }
+                    LabeledContent("版本", value: appVersion)
+                }
+
+                Section("更新日志") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("2.0").font(.headline)
+                        Text("• 改用服务器 yt-dlp 解析\n• 后台下载与完成通知\n• 实时速度、流量和剩余时间\n• 灵动岛与锁屏实时进度\n• 删除内置浏览器和 Cookie 登录")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
                 }
             }
-            .navigationTitle("Cookie 设置")
+            .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -289,184 +299,18 @@ private struct CookieSettingsView: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
-        .fullScreenCover(isPresented: $showingYouTubeBrowser) {
-            YouTubeBrowserLoginView(model: model)
-        }
-    }
-}
-
-private struct YouTubeBrowserLoginView: View {
-    @ObservedObject var model: DownloadViewModel
-    @Environment(\.dismiss) private var dismiss
-    @State private var statusText = "请在页面中登录 YouTube，登录成功后会自动读取 Cookie。"
-
-    var body: some View {
-        NavigationStack {
-            YouTubeLoginWebView(statusText: $statusText) { cookie in
-                model.cookieText = cookie
-                model.saveCookie()
-                statusText = model.hasCookie
-                    ? "登录 Cookie 已自动保存，可以关闭浏览器。"
-                    : model.cookieMessage
-            }
-            .safeAreaInset(edge: .bottom) {
-                Text(statusText)
-                    .font(.footnote)
-                    .foregroundStyle(model.hasCookie ? Color.green : Color.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(.ultraThinMaterial)
-            }
-            .navigationTitle("登录 YouTube")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
-                }
-            }
-        }
-    }
-}
-
-private struct YouTubeLoginWebView: UIViewRepresentable {
-    @Binding var statusText: String
-    let onCookieFound: (String) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(parent: self)
     }
 
-    func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
-        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
-
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.navigationDelegate = context.coordinator
-        webView.uiDelegate = context.coordinator
-        webView.allowsBackForwardNavigationGestures = true
-        context.coordinator.webView = webView
-
-        configuration.websiteDataStore.httpCookieStore.add(context.coordinator)
-
-        if let url = URL(string: "https://www.youtube.com/") {
-            webView.load(URLRequest(url: url))
-        }
-        return webView
-    }
-
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        context.coordinator.parent = self
-    }
-
-    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
-        webView.configuration.websiteDataStore.httpCookieStore.remove(coordinator)
-        webView.navigationDelegate = nil
-        webView.uiDelegate = nil
-    }
-
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPCookieStoreObserver {
-        var parent: YouTubeLoginWebView
-        weak var webView: WKWebView?
-        private var lastCookie = ""
-
-        init(parent: YouTubeLoginWebView) {
-            self.parent = parent
-        }
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation?) {
-            inspectCookies()
-        }
-
-        func webView(
-            _ webView: WKWebView,
-            didFail navigation: WKNavigation?,
-            withError error: Error
-        ) {
-            parent.statusText = "页面加载失败：\(error.localizedDescription)"
-        }
-
-        func webView(
-            _ webView: WKWebView,
-            didFailProvisionalNavigation navigation: WKNavigation?,
-            withError error: Error
-        ) {
-            parent.statusText = "无法打开登录页面：\(error.localizedDescription)"
-        }
-
-        func webView(
-            _ webView: WKWebView,
-            createWebViewWith configuration: WKWebViewConfiguration,
-            for navigationAction: WKNavigationAction,
-            windowFeatures: WKWindowFeatures
-        ) -> WKWebView? {
-            if navigationAction.targetFrame == nil,
-               let url = navigationAction.request.url {
-                webView.load(URLRequest(url: url))
-            }
-            return nil
-        }
-
-        func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
-            inspectCookies()
-        }
-
-        private func inspectCookies() {
-            guard let webView else { return }
-            webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
-                guard let self else { return }
-
-                let allowedNames: Set<String> = [
-                    "SAPISID", "APISID", "SID", "HSID", "SSID",
-                    "__Secure-1PAPISID", "__Secure-1PSID", "__Secure-1PSIDTS",
-                    "__Secure-3PAPISID", "__Secure-3PSID", "__Secure-3PSIDTS",
-                    "LOGIN_INFO", "VISITOR_INFO1_LIVE", "YSC", "PREF"
-                ]
-
-                let matching = cookies.filter { cookie in
-                    let domain = cookie.domain.lowercased()
-                    return allowedNames.contains(cookie.name) &&
-                        (domain.contains("youtube.com") || domain.contains("google.com"))
-                }
-
-                var cookiesByName: [String: HTTPCookie] = [:]
-                for cookie in matching {
-                    let current = cookiesByName[cookie.name]
-                    if current == nil || cookie.domain.lowercased().contains("youtube.com") {
-                        cookiesByName[cookie.name] = cookie
-                    }
-                }
-
-                let selectedCookies = Array(cookiesByName.values)
-                let names = Set(selectedCookies.map(\.name))
-                let hasSAPISID = names.contains("SAPISID")
-                let hasPAPISID = names.contains("__Secure-1PAPISID") || names.contains("__Secure-3PAPISID")
-                let hasPSID = names.contains("__Secure-1PSID") || names.contains("__Secure-3PSID")
-
-                guard hasSAPISID, hasPAPISID, hasPSID else {
-                    self.parent.statusText = "浏览器已打开；完成 Google 登录后会自动保存 Cookie。"
-                    return
-                }
-
-                let cookieHeader = selectedCookies
-                    .sorted { $0.name < $1.name }
-                    .map { "\($0.name)=\($0.value)" }
-                    .joined(separator: "; ")
-
-                guard !cookieHeader.isEmpty, cookieHeader != self.lastCookie else { return }
-                self.lastCookie = cookieHeader
-                self.parent.onCookieFound(cookieHeader)
-            }
-        }
+    private var appVersion: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "6"
+        return "\(version) (\(build))"
     }
 }
 
 private extension View {
     func glassCard() -> some View {
-        self
-            .padding(16)
+        padding(16)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 25, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 25, style: .continuous)
