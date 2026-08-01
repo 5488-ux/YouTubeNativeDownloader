@@ -1,0 +1,56 @@
+workflows:
+  ios-unsigned-ipa:
+    name: iOS Unsigned IPA
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      xcode: 16.4
+    scripts:
+      - name: Resolve Swift packages
+        script: |
+          set -e
+          xcodebuild -resolvePackageDependencies \
+            -project "$CM_BUILD_DIR/YouTubeNativeDownloader.xcodeproj" \
+            -scheme "YouTubeNativeDownloader"
+
+      - name: Build unsigned iPhone app
+        script: |
+          set -e
+          xcodebuild clean build \
+            -project "$CM_BUILD_DIR/YouTubeNativeDownloader.xcodeproj" \
+            -scheme "YouTubeNativeDownloader" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$CM_BUILD_DIR/build/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Package unsigned IPA
+        script: |
+          set -e
+          APP_PATH="$CM_BUILD_DIR/build/DerivedData/Build/Products/Release-iphoneos/YouTubeNativeDownloader.app"
+          IPA_DIR="$CM_BUILD_DIR/build/ios/ipa"
+
+          test -d "$APP_PATH"
+          rm -rf "$IPA_DIR/Payload"
+          mkdir -p "$IPA_DIR/Payload"
+          cp -R "$APP_PATH" "$IPA_DIR/Payload/"
+
+          cd "$IPA_DIR"
+          /usr/bin/zip -qry "YouTubeNativeDownloader-unsigned.ipa" Payload
+          rm -rf Payload
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - build/DerivedData/Build/Products/Release-iphoneos/*.app
+      - /tmp/xcodebuild_logs/*.log
+
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+
