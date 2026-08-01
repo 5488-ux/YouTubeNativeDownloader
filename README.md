@@ -1,6 +1,6 @@
 # 本地下载器 iOS
 
-这是一个纯原生 SwiftUI 工程，不打开 `youtube.789113.cn`，也不经过你的服务器传输视频。
+这是一个纯原生 SwiftUI 工程
 
 解析由 iPhone 内的 [YouTubeKit](https://github.com/b5i/YouTubeKit) 完成；视频和音频由手机直接下载，再使用 AVFoundation 在本机无损封装成 MP4。
 
@@ -13,7 +13,7 @@
 - 下载完成后可保存到“照片”或“文件”。
 - App 文稿目录可通过 iPhone“文件”App访问。
 
-##食用方法
+## 食用方法
 
 -使用自己的p12证书打包或爱思助手
 -789113.cn
