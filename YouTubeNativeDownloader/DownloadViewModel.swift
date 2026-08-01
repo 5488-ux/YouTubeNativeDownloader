@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import Security
 
 @MainActor
 final class DownloadViewModel: ObservableObject {
@@ -12,10 +13,15 @@ final class DownloadViewModel: ObservableObject {
     @Published private(set) var errorText: String?
     @Published private(set) var latestFile: URL?
     @Published private(set) var savedFiles: [URL] = []
+    @Published var cookieText = ""
+    @Published private(set) var hasCookie = false
+    @Published private(set) var cookieMessage = "Cookie 只保存在本机 Keychain。"
 
     private let resolver = VideoResolver()
 
     init() {
+        cookieText = CookieVault.load() ?? ""
+        hasCookie = !cookieText.isEmpty
         refreshFiles()
     }
 
@@ -29,7 +35,12 @@ final class DownloadViewModel: ObservableObject {
 
         Task {
             do {
-                let media = try await resolver.resolve(urlText: urlText, quality: quality, kind: kind)
+                let media = try await resolver.resolve(
+                    urlText: urlText,
+                    quality: quality,
+                    kind: kind,
+                    cookie: hasCookie ? cookieText : nil
+                )
                 let output: URL
 
                 switch kind {
@@ -83,6 +94,38 @@ final class DownloadViewModel: ObservableObject {
         errorText = nil
     }
 
+    func saveCookie() {
+        let normalized = cookieText
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard normalized.contains("SAPISID="),
+              normalized.contains("__Secure-1PAPISID="),
+              normalized.contains("__Secure-1PSID=") else {
+            hasCookie = false
+            cookieMessage = "Cookie 缺少 SAPISID、__Secure-1PAPISID 或 __Secure-1PSID。"
+            return
+        }
+
+        guard CookieVault.save(normalized) else {
+            hasCookie = false
+            cookieMessage = "保存到 Keychain 失败。"
+            return
+        }
+
+        cookieText = normalized
+        hasCookie = true
+        cookieMessage = "Cookie 已保存到本机 Keychain。"
+    }
+
+    func clearCookie() {
+        CookieVault.clear()
+        cookieText = ""
+        hasCookie = false
+        cookieMessage = "Cookie 已清除。"
+    }
+
     func refreshFiles() {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
@@ -113,5 +156,50 @@ final class DownloadViewModel: ObservableObject {
         guard let width = source.width, let height = source.height else { return "H.264" }
         let fps = source.fps.map { " · \($0)fps" } ?? ""
         return "\(width)×\(height)\(fps) · H.264"
+    }
+}
+
+private enum CookieVault {
+    private static let service = "cn.local.YouTubeNativeDownloader"
+    private static let account = "youtube-cookie"
+
+    static func load() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func save(_ value: String) -> Bool {
+        guard let data = value.data(using: .utf8) else { return false }
+        clear()
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecValueData as String: data
+        ]
+        return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
+    }
+
+    static func clear() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(query as CFDictionary)
     }
 }

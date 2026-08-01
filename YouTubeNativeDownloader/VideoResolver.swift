@@ -52,10 +52,21 @@ final class VideoResolver {
         self.model = model
     }
 
-    func resolve(urlText: String, quality: VideoQuality, kind: DownloadKind) async throws -> ResolvedMedia {
+    func resolve(
+        urlText: String,
+        quality: VideoQuality,
+        kind: DownloadKind,
+        cookie: String?
+    ) async throws -> ResolvedMedia {
         let videoID = try Self.extractVideoID(from: urlText)
+        let normalizedCookie = cookie?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        model.cookies = normalizedCookie
+        model.alwaysUseCookies = !normalizedCookie.isEmpty
+
         try await verifyYouTubeConnection()
-        try await verifyVideoAvailability(videoID: videoID)
+        if normalizedCookie.isEmpty {
+            try await verifyVideoAvailability(videoID: videoID)
+        }
         let video = YTVideo(videoId: videoID)
         let response = try await fetchDownloadResponse(for: video)
 
@@ -137,19 +148,37 @@ final class VideoResolver {
             model.selectedLocale = locale
 
             do {
-                let playerResponse = try await video.fetchStreamingInfosThrowing(
-                    youtubeModel: model,
-                    useCookies: false
-                )
+                let useAuthenticatedRequest = !model.cookies.isEmpty
+                let playerResponse: VideoInfosResponse
+
+                if useAuthenticatedRequest {
+                    playerResponse = try await sendAuthenticatedRequest(
+                        responseType: VideoInfosResponse.self,
+                        videoID: video.videoId
+                    )
+                } else {
+                    playerResponse = try await video.fetchStreamingInfosThrowing(
+                        youtubeModel: model,
+                        useCookies: false
+                    )
+                }
 
                 guard let player = playerResponse.player else {
                     throw DownloaderError.extractionFailed("YouTube 没有返回播放器脚本。")
                 }
 
-                var downloadResponse = try await video.fetchStreamingInfosWithDownloadFormatsThrowing(
-                    youtubeModel: model,
-                    useCookies: false
-                )
+                var downloadResponse: VideoInfosWithDownloadFormatsResponse
+                if useAuthenticatedRequest {
+                    downloadResponse = try await sendAuthenticatedRequest(
+                        responseType: VideoInfosWithDownloadFormatsResponse.self,
+                        videoID: video.videoId
+                    )
+                } else {
+                    downloadResponse = try await video.fetchStreamingInfosWithDownloadFormatsThrowing(
+                        youtubeModel: model,
+                        useCookies: false
+                    )
+                }
                 try downloadResponse.deciphersURLs(player: player)
                 return downloadResponse
             } catch {
@@ -173,6 +202,21 @@ final class VideoResolver {
         throw DownloaderError.extractionFailed(
             lastError.map { String(describing: $0) } ?? "未知解析错误"
         )
+    }
+
+    private func sendAuthenticatedRequest<Response: YouTubeResponse>(
+        responseType: Response.Type,
+        videoID: String
+    ) async throws -> Response {
+        try await withCheckedThrowingContinuation { continuation in
+            model.sendRequest(
+                responseType: responseType,
+                data: [.query: videoID],
+                useCookies: true
+            ) { result in
+                continuation.resume(with: result)
+            }
+        }
     }
 
     private func verifyYouTubeConnection() async throws {

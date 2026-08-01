@@ -4,6 +4,7 @@ import UIKit
 struct ContentView: View {
     @StateObject private var model = DownloadViewModel()
     @State private var shareItem: ShareItem?
+    @State private var showingCookieSettings = false
 
     var body: some View {
         NavigationStack {
@@ -28,6 +29,9 @@ struct ContentView: View {
             .navigationBarHidden(true)
             .sheet(item: $shareItem) { item in
                 ShareSheet(fileURL: item.fileURL)
+            }
+            .sheet(isPresented: $showingCookieSettings) {
+                CookieSettingsView(model: model)
             }
             .alert("下载失败", isPresented: Binding(
                 get: { model.errorText != nil },
@@ -101,6 +105,23 @@ struct ContentView: View {
                 .padding(14)
                 .background(.white.opacity(0.66), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
+
+            Button {
+                showingCookieSettings = true
+            } label: {
+                HStack {
+                    Label("YouTube Cookie", systemImage: "key.fill")
+                    Spacer()
+                    Text(model.hasCookie ? "已保存" : "未设置")
+                        .foregroundStyle(model.hasCookie ? Color.green : Color.secondary)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(14)
+                .background(.white.opacity(0.66), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            .buttonStyle(.plain)
 
             Button(action: model.start) {
                 HStack {
@@ -203,6 +224,56 @@ struct ContentView: View {
             }
         }
         .glassCard()
+    }
+}
+
+private struct CookieSettingsView: View {
+    @ObservedObject var model: DownloadViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("YouTube Cookie") {
+                    SecureField("粘贴完整 Cookie 字符串", text: $model.cookieText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    Button("从剪贴板粘贴") {
+                        model.cookieText = UIPasteboard.general.string ?? ""
+                    }
+
+                    Button("保存到本机 Keychain") {
+                        model.saveCookie()
+                    }
+                    .disabled(model.cookieText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    if model.hasCookie {
+                        Button("清除 Cookie", role: .destructive) {
+                            model.clearCookie()
+                        }
+                    }
+                } footer: {
+                    Text(model.cookieMessage)
+                }
+
+                Section("需要的字段") {
+                    Text("SAPISID")
+                    Text("__Secure-1PAPISID")
+                    Text("__Secure-1PSID")
+                } footer: {
+                    Text("只使用你自己的 YouTube Cookie。Cookie 相当于登录凭证，过期后需要重新粘贴。")
+                }
+            }
+            .navigationTitle("Cookie 设置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 
