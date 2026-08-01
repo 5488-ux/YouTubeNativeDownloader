@@ -283,8 +283,8 @@ private struct SettingsView: View {
 
                 Section("更新日志") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("2.0").font(.headline)
-                        Text("• 改用服务器 yt-dlp 解析\n• 后台下载与完成通知\n• 实时速度、流量和剩余时间\n• 灵动岛与锁屏实时进度\n• 删除内置浏览器和 Cookie 登录")
+                        Text("2.1").font(.headline)
+                        Text("• 修复下载视频长期卡在 0%\n• 使用稳定服务器中转地址\n• 下载后由 iPhone 合并并转换 MOV\n• 新增 MOV 转换真实进度条\n• 保留后台下载、通知和灵动岛")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -302,8 +302,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "6"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.1"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "7"
         return "\(version) (\(build))"
     }
 }

@@ -125,9 +125,11 @@ function registerSource(req, format) {
     userAgent: format?.http_headers?.['User-Agent'] || 'Mozilla/5.0'
   });
   schedulePersist();
+  const relayURL = `${publicBase(req)}/media/${token}`;
   return {
-    url: sourceURL,
-    fallback_url: `${publicBase(req)}/media/${token}`,
+    url: relayURL,
+    fallback_url: null,
+    direct_url: sourceURL,
     content_length: asNumber(format.filesize || format.filesize_approx),
     codec: format.vcodec && format.vcodec !== 'none' ? format.vcodec : format.acodec,
     width: asNumber(format.width),

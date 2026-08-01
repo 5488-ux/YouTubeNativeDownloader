@@ -150,7 +150,12 @@ final class DownloadTransfer: NSObject, URLSessionDownloadDelegate, @unchecked S
 }
 
 enum MediaFileBuilder {
-    static func merge(videoURL: URL, audioURL: URL, title: String) async throws -> URL {
+    static func mergeToMOV(
+        videoURL: URL,
+        audioURL: URL,
+        title: String,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> URL {
         let videoAsset = AVURLAsset(url: videoURL)
         let audioAsset = AVURLAsset(url: audioURL)
         let composition = AVMutableComposition()
@@ -184,14 +189,14 @@ enum MediaFileBuilder {
             at: .zero
         )
 
-        guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
+        guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
             throw DownloaderError.mergeFailed("无法创建导出任务")
         }
-        let output = uniqueDocumentURL(title: title, extension: "mp4")
+        let output = uniqueDocumentURL(title: title, extension: "mov")
         exporter.outputURL = output
-        exporter.outputFileType = .mp4
+        exporter.outputFileType = .mov
         exporter.shouldOptimizeForNetworkUse = true
-        try await export(exporter)
+        try await export(exporter, progress: progress)
         return output
     }
 
@@ -201,11 +206,23 @@ enum MediaFileBuilder {
         return output
     }
 
-    private static func export(_ exporter: AVAssetExportSession) async throws {
+    private static func export(
+        _ exporter: AVAssetExportSession,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws {
         try await withCheckedThrowingContinuation { continuation in
+            let progressTimer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+            progressTimer.schedule(deadline: .now(), repeating: .milliseconds(250))
+            progressTimer.setEventHandler {
+                progress(min(0.99, max(0, Double(exporter.progress))))
+            }
+            progressTimer.resume()
+
             exporter.exportAsynchronously {
+                progressTimer.cancel()
                 switch exporter.status {
                 case .completed:
+                    progress(1)
                     continuation.resume()
                 case .failed, .cancelled:
                     continuation.resume(throwing: DownloaderError.mergeFailed(

@@ -19,7 +19,7 @@ struct ResolvedMedia: Sendable {
 }
 
 enum DownloadKind: String, CaseIterable, Identifiable, Codable {
-    case video = "视频 MP4"
+    case video = "视频 MOV"
     case audio = "音频 M4A"
 
     var id: String { rawValue }

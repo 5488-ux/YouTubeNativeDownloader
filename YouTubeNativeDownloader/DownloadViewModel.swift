@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import UIKit
 
 @MainActor
 final class DownloadViewModel: ObservableObject {
@@ -86,8 +87,8 @@ final class DownloadViewModel: ObservableObject {
                     let videoLength = max(0, video.contentLength ?? 0)
                     let audioLength = max(0, media.audio.contentLength ?? 0)
                     let knownTotal = videoLength + audioLength
-                    let videoWeight = knownTotal > 0 ? Double(videoLength) / Double(knownTotal) * 0.96 : 0.80
-                    let audioWeight = 0.96 - videoWeight
+                    let videoWeight = knownTotal > 0 ? Double(videoLength) / Double(knownTotal) * 0.90 : 0.75
+                    let audioWeight = 0.90 - videoWeight
 
                     statusText = resolutionText(video) + " · 下载视频"
                     let videoFile = try await downloadWithFallback(
@@ -107,16 +108,33 @@ final class DownloadViewModel: ObservableObject {
                         }
                     }
 
-                    statusText = "本机无损合并音视频"
-                    progress = 0.97
-                    speedText = "本机处理"
-                    etaText = "即将完成"
+                    statusText = "iPhone 正在合并并转换 MOV"
+                    progress = 0.90
+                    speedText = "本机转换"
+                    etaText = "转换 0%"
                     updateActivity(force: true)
-                    output = try await MediaFileBuilder.merge(
+
+                    let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "MOV conversion")
+                    defer {
+                        if backgroundTask != .invalid {
+                            UIApplication.shared.endBackgroundTask(backgroundTask)
+                        }
+                    }
+                    output = try await MediaFileBuilder.mergeToMOV(
                         videoURL: videoFile,
                         audioURL: audioFile,
                         title: media.title
-                    )
+                    ) { [weak self] conversionProgress in
+                        Task { @MainActor in
+                            guard let self else { return }
+                            let percent = Int(conversionProgress * 100)
+                            self.progress = 0.90 + conversionProgress * 0.09
+                            self.statusText = "iPhone 正在转换 MOV · \(percent)%"
+                            self.speedText = "本机转换"
+                            self.etaText = "转换 \(percent)%"
+                            self.updateActivity(force: false)
+                        }
+                    }
                     try? FileManager.default.removeItem(at: videoFile)
                     try? FileManager.default.removeItem(at: audioFile)
 
