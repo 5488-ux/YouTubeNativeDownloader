@@ -48,18 +48,14 @@ final class VideoResolver {
 
     init() {
         let model = YouTubeModel()
-        model.selectedLocale = "zh-CN"
+        model.selectedLocale = "en-US"
         self.model = model
     }
 
     func resolve(urlText: String, quality: VideoQuality, kind: DownloadKind) async throws -> ResolvedMedia {
         let videoID = try Self.extractVideoID(from: urlText)
         let video = YTVideo(videoId: videoID)
-        var response = try await video.fetchStreamingInfosWithDownloadFormatsThrowing(youtubeModel: model)
-
-        if let player = response.videoInfos.player {
-            try response.deciphersURLs(player: player)
-        }
+        let response = try await fetchDownloadResponse(for: video)
 
         let audioCandidates = response.downloadFormats
             .compactMap { $0 as? AudioOnlyFormat }
@@ -129,6 +125,43 @@ final class VideoResolver {
             videoID: videoID,
             video: selectedVideo,
             audio: audio
+        )
+    }
+
+    private func fetchDownloadResponse(for video: YTVideo) async throws -> VideoInfosWithDownloadFormatsResponse {
+        var lastError: Error?
+
+        for locale in ["en-US", "zh-CN"] {
+            model.selectedLocale = locale
+
+            do {
+                let playerResponse = try await video.fetchStreamingInfosThrowing(
+                    youtubeModel: model,
+                    useCookies: false
+                )
+
+                guard let player = playerResponse.player else {
+                    throw DownloaderError.extractionFailed("YouTube 没有返回播放器脚本。")
+                }
+
+                var downloadResponse = try await video.fetchStreamingInfosWithDownloadFormatsThrowing(
+                    youtubeModel: model,
+                    useCookies: false
+                )
+                try downloadResponse.deciphersURLs(player: player)
+                return downloadResponse
+            } catch {
+                lastError = error
+                try? PlayerProcessing.PlayersCache.clearCache()
+            }
+        }
+
+        if let extractionError = lastError as? ResponseExtractionError {
+            throw DownloaderError.extractionFailed(extractionError.stepDescription)
+        }
+
+        throw DownloaderError.extractionFailed(
+            lastError.map { String(describing: $0) } ?? "未知解析错误"
         )
     }
 
