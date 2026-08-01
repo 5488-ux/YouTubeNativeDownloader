@@ -263,7 +263,7 @@ const server = createServer(async (req, res) => {
     json(res, 200, { ok: true, service: 'youtube-ios-resolver' });
     return;
   }
-  if (req.method === 'POST' && path === '/resolve') {
+  if (req.method === 'POST' && (path === '/resolve' || path === '/resolv')) {
     await resolveMedia(req, res);
     return;
   }
