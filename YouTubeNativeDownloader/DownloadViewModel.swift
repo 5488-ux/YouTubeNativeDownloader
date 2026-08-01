@@ -100,11 +100,14 @@ final class DownloadViewModel: ObservableObject {
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard normalized.contains("SAPISID="),
-              normalized.contains("__Secure-1PAPISID="),
-              normalized.contains("__Secure-1PSID=") else {
+        let hasPAPISID = normalized.contains("__Secure-1PAPISID=") ||
+            normalized.contains("__Secure-3PAPISID=")
+        let hasPSID = normalized.contains("__Secure-1PSID=") ||
+            normalized.contains("__Secure-3PSID=")
+
+        guard normalized.contains("SAPISID="), hasPAPISID, hasPSID else {
             hasCookie = false
-            cookieMessage = "Cookie 缺少 SAPISID、__Secure-1PAPISID 或 __Secure-1PSID。"
+            cookieMessage = "Cookie 缺少 SAPISID，以及 Secure PAPISID/PSID。"
             return
         }
 
