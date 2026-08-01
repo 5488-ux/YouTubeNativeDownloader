@@ -9,6 +9,8 @@ enum DownloaderError: LocalizedError {
     case mergeFailed(String)
     case extractionFailed(String)
     case youtubeNetworkUnavailable(String)
+    case videoUnavailable
+    case youtubeLoginRequired
 
     var errorDescription: String? {
         switch self {
@@ -28,6 +30,10 @@ enum DownloaderError: LocalizedError {
             return "YouTube 解析失败：\(message)\n请确认视频可公开播放，然后重新尝试。"
         case .youtubeNetworkUnavailable(let message):
             return message
+        case .videoUnavailable:
+            return "这条视频在 YouTube 已不可用，可能已删除、转为私密，或者链接 ID 已失效。请先在 YouTube App 或 Safari 中确认它能正常播放。"
+        case .youtubeLoginRequired:
+            return "YouTube 要求登录或人机验证。请先在 YouTube App 或 Safari 中确认视频能播放；如果能播放，说明当前匿名解析被 YouTube 风控限制。"
         }
     }
 }

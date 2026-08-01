@@ -55,6 +55,7 @@ final class VideoResolver {
     func resolve(urlText: String, quality: VideoQuality, kind: DownloadKind) async throws -> ResolvedMedia {
         let videoID = try Self.extractVideoID(from: urlText)
         try await verifyYouTubeConnection()
+        try await verifyVideoAvailability(videoID: videoID)
         let video = YTVideo(videoId: videoID)
         let response = try await fetchDownloadResponse(for: video)
 
@@ -163,6 +164,9 @@ final class VideoResolver {
         }
 
         if let extractionError = lastError as? ResponseExtractionError {
+            if extractionError.stepDescription.localizedCaseInsensitiveContains("login is required") {
+                throw DownloaderError.youtubeLoginRequired
+            }
             throw DownloaderError.extractionFailed(extractionError.stepDescription)
         }
 
@@ -205,6 +209,47 @@ final class VideoResolver {
                 )
             }
             throw DownloaderError.youtubeNetworkUnavailable("当前网络无法连接 YouTube。")
+        }
+    }
+
+    private func verifyVideoAvailability(videoID: String) async throws {
+        var components = URLComponents(string: "https://www.youtube.com/oembed")
+        components?.queryItems = [
+            URLQueryItem(
+                name: "url",
+                value: "https://www.youtube.com/watch?v=\(videoID)"
+            ),
+            URLQueryItem(name: "format", value: "json")
+        ]
+
+        guard let url = components?.url else {
+            throw DownloaderError.invalidURL
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 12
+        configuration.timeoutIntervalForResource = 15
+        configuration.waitsForConnectivity = false
+        let session = URLSession(configuration: configuration)
+        defer { session.finishTasksAndInvalidate() }
+
+        do {
+            let (_, response) = try await session.data(from: url)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return
+            }
+
+            if httpResponse.statusCode == 404 {
+                throw DownloaderError.videoUnavailable
+            }
+        } catch let error as DownloaderError {
+            throw error
+        } catch {
+            if let urlError = Self.findURLError(in: error) {
+                throw DownloaderError.youtubeNetworkUnavailable(
+                    Self.networkMessage(for: urlError)
+                )
+            }
         }
     }
 
