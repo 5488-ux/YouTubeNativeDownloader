@@ -236,7 +236,7 @@ private struct CookieSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("YouTube Cookie") {
+                Section {
                     Button {
                         showingYouTubeBrowser = true
                     } label: {
@@ -265,14 +265,18 @@ private struct CookieSettingsView: View {
                             ) { }
                         }
                     }
+                } header: {
+                    Text("YouTube Cookie")
                 } footer: {
                     Text(model.cookieMessage)
                 }
 
-                Section("需要的字段") {
+                Section {
                     Text("SAPISID")
                     Text("__Secure-1PAPISID")
                     Text("__Secure-1PSID")
+                } header: {
+                    Text("需要的字段")
                 } footer: {
                     Text("只使用你自己的 YouTube Cookie。Cookie 相当于登录凭证，过期后需要重新粘贴。")
                 }
