@@ -8,6 +8,7 @@ enum DownloaderError: LocalizedError {
     case downloadFailed
     case mergeFailed(String)
     case extractionFailed(String)
+    case youtubeNetworkUnavailable(String)
 
     var errorDescription: String? {
         switch self {
@@ -25,6 +26,8 @@ enum DownloaderError: LocalizedError {
             return "音视频合并失败：\(message)"
         case .extractionFailed(let message):
             return "YouTube 解析失败：\(message)\n请确认视频可公开播放，然后重新尝试。"
+        case .youtubeNetworkUnavailable(let message):
+            return message
         }
     }
 }
