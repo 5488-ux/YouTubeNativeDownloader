@@ -1,4 +1,4 @@
-# 本地下载器 iOS
+# 本地下载器 iOS（正在抢修bug）
 
 原生 SwiftUI YouTube 下载器，支持 iOS 16.1 及以上版本（含 iOS 26）。解析由服务器上的 `yt-dlp` 完成，下载、进度展示和音视频合并由 iPhone 处理。
 
