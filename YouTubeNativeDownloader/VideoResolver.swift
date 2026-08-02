@@ -127,9 +127,10 @@ final class VideoResolver {
                     DiagnosticLogger.shared.warning("解析响应不是 HTTPURLResponse; attempt=\(attempt)")
                     throw DownloaderError.resolverUnavailable("解析服务器没有返回有效响应。")
                 }
+                let responseMIMEType = http.mimeType ?? "unknown"
                 DiagnosticLogger.shared.info(
                     "解析响应; attempt=\(attempt); HTTP=\(http.statusCode); bytes=\(data.count); " +
-                    "mime=\(http.mimeType ?? \"unknown\")"
+                    "mime=\(responseMIMEType)"
                 )
 
                 if Self.isRetryableHTTPStatus(http.statusCode) {
