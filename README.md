@@ -39,3 +39,5 @@ App 设置中可以修改解析接口地址。服务端下载令牌默认六小�
 `build/ios/ipa/YouTubeNativeDownloader-unsigned.ipa`
 
 这是未签名 IPA，需要使用你自己的证书或签名工具签名。IPA 内包含 Live Activity 扩展，签名时主 App 和 `.appex` 必须同时签名。
+
+可以使用全能签签名
