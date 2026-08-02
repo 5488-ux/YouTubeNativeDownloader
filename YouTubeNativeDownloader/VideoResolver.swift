@@ -95,42 +95,89 @@ final class VideoResolver {
 
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
-        request.timeoutInterval = 60
+        request.timeoutInterval = 75
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
+        request.setValue("YouTubeNativeDownloader/3.2", forHTTPHeaderField: "User-Agent")
         request.httpBody = try JSONEncoder().encode(ResolveRequest(
             url: urlText.trimmingCharacters(in: .whitespacesAndNewlines),
             kind: kind.apiValue,
             quality: quality.apiValue
         ))
-        DiagnosticLogger.shared.info("解析请求已创建; timeout=60s")
+        DiagnosticLogger.shared.info("解析请求已创建; timeout=75s; maxAttempts=3")
 
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 60
-        configuration.timeoutIntervalForResource = 75
-        configuration.waitsForConnectivity = true
-        let session = URLSession(configuration: configuration)
-        defer { session.finishTasksAndInvalidate() }
+        let maxAttempts = 3
+        for attempt in 1...maxAttempts {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+            configuration.timeoutIntervalForRequest = 75
+            configuration.timeoutIntervalForResource = 90
+            configuration.waitsForConnectivity = true
+            configuration.httpMaximumConnectionsPerHost = 1
+            let session = URLSession(configuration: configuration)
+            DiagnosticLogger.shared.info("开始解析请求; attempt=\(attempt)/\(maxAttempts)")
 
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch let error as URLError {
-            DiagnosticLogger.shared.error(error, stage: "解析网络请求")
-            if error.code == .timedOut {
-                throw DownloaderError.resolverUnavailable("解析服务器响应超时，请重试。")
+            do {
+                let (data, response) = try await session.data(for: request)
+                session.finishTasksAndInvalidate()
+
+                guard let http = response as? HTTPURLResponse else {
+                    DiagnosticLogger.shared.warning("解析响应不是 HTTPURLResponse; attempt=\(attempt)")
+                    throw DownloaderError.resolverUnavailable("解析服务器没有返回有效响应。")
+                }
+                DiagnosticLogger.shared.info(
+                    "解析响应; attempt=\(attempt); HTTP=\(http.statusCode); bytes=\(data.count); " +
+                    "mime=\(http.mimeType ?? \"unknown\")"
+                )
+
+                if Self.isRetryableHTTPStatus(http.statusCode) {
+                    if attempt < maxAttempts {
+                        DiagnosticLogger.shared.warning(
+                            "解析服务器暂时异常，自动重试; HTTP=\(http.statusCode); nextAttempt=\(attempt + 1)"
+                        )
+                        try await Self.waitBeforeRetry(attempt: attempt)
+                        continue
+                    }
+                    throw DownloaderError.resolverUnavailable(
+                        "解析服务器暂时不可用（HTTP \(http.statusCode)），已自动重试 \(maxAttempts) 次。"
+                    )
+                }
+
+                return try decodeResolvedMedia(data: data, http: http, kind: kind)
+            } catch let error as URLError {
+                session.invalidateAndCancel()
+                DiagnosticLogger.shared.error(error, stage: "解析网络请求 attempt=\(attempt)/\(maxAttempts)")
+                if Self.isRetryableNetworkError(error), attempt < maxAttempts {
+                    DiagnosticLogger.shared.warning(
+                        "解析连接中断，自动重试; code=\(error.code.rawValue); nextAttempt=\(attempt + 1)"
+                    )
+                    try await Self.waitBeforeRetry(attempt: attempt)
+                    continue
+                }
+                if error.code == .timedOut {
+                    throw DownloaderError.resolverUnavailable(
+                        "解析服务器响应超时，已自动重试 \(attempt) 次。"
+                    )
+                }
+                throw DownloaderError.resolverUnavailable(
+                    "无法连接解析服务器（已尝试 \(attempt) 次）：\(error.localizedDescription)"
+                )
+            } catch {
+                session.invalidateAndCancel()
+                throw error
             }
-            throw DownloaderError.resolverUnavailable("无法连接解析服务器：\(error.localizedDescription)")
         }
 
-        guard let http = response as? HTTPURLResponse else {
-            DiagnosticLogger.shared.warning("解析响应不是 HTTPURLResponse")
-            throw DownloaderError.resolverUnavailable("解析服务器没有返回有效响应。")
-        }
-        DiagnosticLogger.shared.info("解析响应; HTTP=\(http.statusCode); bytes=\(data.count); mime=\(http.mimeType ?? "unknown")")
+        throw DownloaderError.resolverUnavailable("解析请求未能完成。")
+    }
 
+    private func decodeResolvedMedia(
+        data: Data,
+        http: HTTPURLResponse,
+        kind: DownloadKind
+    ) throws -> ResolvedMedia {
         let decoded: ResolveResponse
         do {
             decoded = try JSONDecoder().decode(ResolveResponse.self, from: data)
@@ -161,6 +208,39 @@ final class VideoResolver {
             video: video,
             audio: audio
         )
+    }
+
+    private static func isRetryableHTTPStatus(_ statusCode: Int) -> Bool {
+        statusCode == 408 ||
+        statusCode == 425 ||
+        statusCode == 429 ||
+        statusCode == 500 ||
+        statusCode == 502 ||
+        statusCode == 503 ||
+        statusCode == 504 ||
+        (520...524).contains(statusCode)
+    }
+
+    private static func isRetryableNetworkError(_ error: URLError) -> Bool {
+        switch error.code {
+        case .networkConnectionLost,
+             .timedOut,
+             .cannotConnectToHost,
+             .cannotFindHost,
+             .dnsLookupFailed,
+             .notConnectedToInternet,
+             .secureConnectionFailed,
+             .internationalRoamingOff,
+             .dataNotAllowed:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func waitBeforeRetry(attempt: Int) async throws {
+        let delay = UInt64(attempt) * 1_000_000_000
+        try await Task.sleep(nanoseconds: delay)
     }
 
     private func makeSource(_ source: SourceResponse) -> MediaSource? {

@@ -7,6 +7,8 @@ struct ContentView: View {
     @State private var shareItem: ShareItem?
     @State private var showingSettings = false
     @State private var showingFFmpegPrompt = false
+    @State private var showingWhatsNew = false
+    @AppStorage("lastPresentedChangelogVersion") private var lastPresentedChangelogVersion = ""
 
     var body: some View {
         NavigationStack {
@@ -36,11 +38,19 @@ struct ContentView: View {
             .sheet(isPresented: $showingSettings) {
                 SettingsView(model: model, ffmpeg: ffmpeg)
             }
+            .sheet(isPresented: $showingWhatsNew, onDismiss: scheduleFFmpegPrompt) {
+                WhatsNewView(release: ReleaseNote.current) {
+                    lastPresentedChangelogVersion = ReleaseNote.current.version
+                    showingWhatsNew = false
+                }
+                .interactiveDismissDisabled()
+            }
             .onAppear {
-                if !ffmpeg.isInstalled {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-                        showingFFmpegPrompt = true
-                    }
+                guard !showingWhatsNew, !showingFFmpegPrompt else { return }
+                if lastPresentedChangelogVersion != ReleaseNote.current.version {
+                    showingWhatsNew = true
+                } else {
+                    scheduleFFmpegPrompt()
                 }
             }
             .alert("下载完整 FFmpeg 组件", isPresented: $showingFFmpegPrompt) {
@@ -69,6 +79,15 @@ struct ContentView: View {
             } message: {
                 Text(model.errorText ?? "未知错误")
             }
+        }
+        .preferredColorScheme(.light)
+    }
+
+    private func scheduleFFmpegPrompt() {
+        guard !ffmpeg.isInstalled, !showingWhatsNew else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard !ffmpeg.isInstalled, !showingWhatsNew, !showingSettings else { return }
+            showingFFmpegPrompt = true
         }
     }
 
@@ -104,23 +123,23 @@ struct ContentView: View {
 
     private var appBackground: some View {
         ZStack {
-            Color(red: 0.94, green: 0.97, blue: 1.0)
+            Color(red: 0.97, green: 0.985, blue: 1.0)
             LinearGradient(
                 colors: [
-                    Color.white.opacity(0.9),
-                    Color(red: 0.86, green: 0.92, blue: 1.0),
-                    Color(red: 0.92, green: 0.88, blue: 1.0).opacity(0.72)
+                    Color.white,
+                    Color(red: 0.90, green: 0.96, blue: 1.0),
+                    Color(red: 0.94, green: 0.92, blue: 1.0)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             Circle()
-                .fill(Color.cyan.opacity(0.2))
+                .fill(Color.cyan.opacity(0.14))
                 .frame(width: 260, height: 260)
                 .blur(radius: 24)
                 .offset(x: 150, y: -260)
             Circle()
-                .fill(Color.indigo.opacity(0.16))
+                .fill(Color.indigo.opacity(0.10))
                 .frame(width: 300, height: 300)
                 .blur(radius: 36)
                 .offset(x: -170, y: 320)
@@ -584,18 +603,34 @@ private struct SettingsView: View {
                     }
                 }
 
-                Section("更新日志") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("3.1").font(.headline)
-                        Text("• 替换不兼容的 a-Shell 私有 FFmpeg，改用标准 WASI FFmpeg 5.1.7\n• 使用独立沙盒工作目录无损合并 MP4\n• 合并失败日志增加组件版本、输入和输出字节数")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                Section("更新") {
+                    NavigationLink {
+                        ChangelogView()
+                    } label: {
+                        Label {
+                            HStack {
+                                Text("更新日志")
+                                Spacer()
+                                Text("v\(ReleaseNote.current.version)")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.blue)
+                            }
+                        } icon: {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .foregroundStyle(.blue)
+                        }
                     }
-                    .padding(.vertical, 4)
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(Color(red: 0.93, green: 0.96, blue: 1.0))
+            .background(
+                LinearGradient(
+                    colors: [.white, Color(red: 0.91, green: 0.96, blue: 1.0)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .tint(.blue)
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -604,12 +639,234 @@ private struct SettingsView: View {
                 }
             }
         }
+        .preferredColorScheme(.light)
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "3.1"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "17"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "3.2"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "18"
         return "\(version) (\(build))"
+    }
+}
+
+private struct ReleaseNote: Identifiable {
+    let version: String
+    let title: String
+    let changes: [String]
+
+    var id: String { version }
+
+    static let all: [ReleaseNote] = [
+        ReleaseNote(
+            version: "3.2",
+            title: "明亮界面与完整更新记录",
+            changes: [
+                "提高卡片、表单和文字对比度，解决界面灰蒙蒙的问题。",
+                "更新日志按版本折叠，默认收起，点击版本后展开。",
+                "每个新版本首次启动显示一次更新内容弹窗。",
+                "解析连接中断、超时及 Cloudflare 5xx 错误自动重试。"
+            ]
+        ),
+        ReleaseNote(
+            version: "3.1",
+            title: "标准 WASI FFmpeg",
+            changes: [
+                "替换不兼容的 a-Shell 私有组件，改用标准 WASI FFmpeg 5.1.7。",
+                "使用独立沙盒工作目录无损合并 MP4。",
+                "组件断线自动重试，合并错误记录输入与输出字节数。"
+            ]
+        ),
+        ReleaseNote(
+            version: "3.0",
+            title: "可下载的完整 FFmpeg 组件",
+            changes: [
+                "IPA 不再内置 FFmpeg，用户可在首次启动或设置中下载完整组件。",
+                "增加组件下载进度、速度、剩余时间、SHA-256 校验、重装和删除。",
+                "视频和 AAC 下载完成后使用 FFmpeg 无损合并为 MP4。"
+            ]
+        ),
+        ReleaseNote(
+            version: "2.9",
+            title: "音视频时间轴校验",
+            changes: [
+                "记录视频和音频轨道的开始时间与时长。",
+                "导出后检查成品时长、视频轨和音频轨，发现异常时给出明确错误。",
+                "提高锁屏实时活动文字对比度。"
+            ]
+        ),
+        ReleaseNote(
+            version: "2.7",
+            title: "下载阶段与界面优化",
+            changes: [
+                "服务器解析、视频、AAC 和本机转换只显示当前阶段进度。",
+                "视频与音频使用独立进度，避免进度条挤在一起。",
+                "重做下载入口、任务状态与本机文件卡片。"
+            ]
+        ),
+        ReleaseNote(
+            version: "2.3",
+            title: "自动保存与详细诊断",
+            changes: [
+                "视频转换完成后自动保存到照片图库。",
+                "增加可复制、刷新和清空的持久化详细错误日志。",
+                "保留 App 本机文件，支持再次分享和删除。"
+            ]
+        ),
+        ReleaseNote(
+            version: "2.0",
+            title: "后台下载与灵动岛",
+            changes: [
+                "使用系统后台 URLSession，锁屏或切到后台后继续传输。",
+                "显示实时速度、已下载大小和预计剩余时间。",
+                "增加灵动岛、锁屏 Live Activity 和完成通知。"
+            ]
+        ),
+        ReleaseNote(
+            version: "1.9",
+            title: "服务器中转与 MOV 输出",
+            changes: [
+                "Google 直连失败时自动切换服务器临时中转。",
+                "视频与 AAC 完整下载后在 iPhone 本机合并。",
+                "增加转换进度和照片保存入口。"
+            ]
+        ),
+        ReleaseNote(
+            version: "1.0",
+            title: "首个原生版本",
+            changes: [
+                "原生 SwiftUI 下载界面。",
+                "支持普通 YouTube、Shorts、youtu.be、Embed 和 Live 链接。",
+                "支持最佳画质、1080P、720P、480P 及 M4A 音频。"
+            ]
+        )
+    ]
+
+    static let current = all[0]
+}
+
+private struct WhatsNewView: View {
+    let release: ReleaseNote
+    let dismiss: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LinearGradient(
+                    colors: [.white, Color(red: 0.88, green: 0.95, blue: 1.0)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+
+                VStack(spacing: 22) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.blue.gradient)
+                            .frame(width: 82, height: 82)
+                            .shadow(color: .blue.opacity(0.28), radius: 18, y: 9)
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 34, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+
+                    VStack(spacing: 6) {
+                        Text("已更新到 \(release.version)")
+                            .font(.system(size: 28, weight: .heavy, design: .rounded))
+                        Text(release.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.black.opacity(0.62))
+                    }
+
+                    VStack(alignment: .leading, spacing: 15) {
+                        ForEach(release.changes, id: \.self) { change in
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.blue)
+                                    .font(.system(size: 18, weight: .bold))
+                                Text(change)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(Color.black.opacity(0.82))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    .padding(19)
+                    .background(.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .shadow(color: .blue.opacity(0.09), radius: 20, y: 10)
+
+                    Button(action: dismiss) {
+                        Text("知道了")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 15)
+                            .foregroundStyle(.white)
+                            .background(Color.blue.gradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(22)
+            }
+            .navigationBarHidden(true)
+        }
+        .preferredColorScheme(.light)
+    }
+}
+
+private struct ChangelogView: View {
+    var body: some View {
+        List {
+            ForEach(ReleaseNote.all) { release in
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 11) {
+                        Text(release.title)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Color.black.opacity(0.86))
+                        ForEach(release.changes, id: \.self) { change in
+                            HStack(alignment: .top, spacing: 9) {
+                                Circle()
+                                    .fill(Color.blue)
+                                    .frame(width: 6, height: 6)
+                                    .padding(.top, 6)
+                                Text(change)
+                                    .font(.subheadline)
+                                    .foregroundStyle(Color.black.opacity(0.72))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    .padding(.top, 10)
+                    .padding(.bottom, 5)
+                } label: {
+                    HStack(spacing: 10) {
+                        Text("版本 \(release.version)")
+                            .font(.headline)
+                            .foregroundStyle(Color.black.opacity(0.9))
+                        Spacer()
+                        if release.version == ReleaseNote.current.version {
+                            Text("当前")
+                                .font(.caption2.bold())
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 5)
+                                .background(Color.blue, in: Capsule())
+                        }
+                    }
+                }
+                .tint(.blue)
+                .listRowBackground(Color.white.opacity(0.96))
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(
+            LinearGradient(
+                colors: [.white, Color(red: 0.91, green: 0.96, blue: 1.0)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .navigationTitle("更新日志")
+        .navigationBarTitleDisplayMode(.inline)
+        .preferredColorScheme(.light)
     }
 }
 
@@ -773,19 +1030,26 @@ private struct DiagnosticLogView: View {
 private extension View {
     func glassCard() -> some View {
         padding(17)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .background(
+                LinearGradient(
+                    colors: [Color.white.opacity(0.98), Color(red: 0.95, green: 0.98, blue: 1.0)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: 26, style: .continuous)
+            )
             .overlay {
                 RoundedRectangle(cornerRadius: 26, style: .continuous)
                     .stroke(
                         LinearGradient(
-                            colors: [.white.opacity(0.95), .white.opacity(0.42)],
+                            colors: [.white, Color.blue.opacity(0.14)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
                         lineWidth: 1
                     )
             }
-            .shadow(color: Color.indigo.opacity(0.09), radius: 22, y: 12)
+            .shadow(color: Color.blue.opacity(0.10), radius: 22, y: 12)
     }
 }
 
