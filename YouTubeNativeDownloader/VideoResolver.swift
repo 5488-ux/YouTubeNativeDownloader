@@ -101,6 +101,7 @@ final class VideoResolver {
             kind: kind.apiValue,
             quality: quality.apiValue
         ))
+        DiagnosticLogger.shared.info("解析请求已创建; timeout=60s")
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 60
@@ -114,6 +115,7 @@ final class VideoResolver {
         do {
             (data, response) = try await session.data(for: request)
         } catch let error as URLError {
+            DiagnosticLogger.shared.error(error, stage: "解析网络请求")
             if error.code == .timedOut {
                 throw DownloaderError.resolverUnavailable("解析服务器响应超时，请重试。")
             }
@@ -121,17 +123,21 @@ final class VideoResolver {
         }
 
         guard let http = response as? HTTPURLResponse else {
+            DiagnosticLogger.shared.warning("解析响应不是 HTTPURLResponse")
             throw DownloaderError.resolverUnavailable("解析服务器没有返回有效响应。")
         }
+        DiagnosticLogger.shared.info("解析响应; HTTP=\(http.statusCode); bytes=\(data.count); mime=\(http.mimeType ?? "unknown")")
 
         let decoded: ResolveResponse
         do {
             decoded = try JSONDecoder().decode(ResolveResponse.self, from: data)
         } catch {
+            DiagnosticLogger.shared.error(error, stage: "解析 JSON 解码")
             throw DownloaderError.resolverUnavailable("解析服务器返回了无法识别的数据（HTTP \(http.statusCode)）。")
         }
 
         guard (200...299).contains(http.statusCode), decoded.ok else {
+            DiagnosticLogger.shared.warning("解析业务失败; HTTP=\(http.statusCode); message=\(decoded.message ?? "none")")
             throw DownloaderError.extractionFailed(decoded.message ?? "服务器解析失败（HTTP \(http.statusCode)）")
         }
         guard let title = decoded.title,

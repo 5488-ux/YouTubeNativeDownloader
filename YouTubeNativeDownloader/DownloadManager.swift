@@ -43,6 +43,7 @@ final class DownloadTransfer: NSObject, URLSessionDownloadDelegate, @unchecked S
         allowsCellular: Bool,
         progress: @escaping @Sendable (TransferProgress) -> Void
     ) async throws -> URL {
+        DiagnosticLogger.shared.info("创建后台下载; host=\(source.url.host ?? "unknown"); expectedBytes=\(source.contentLength ?? 0); cellular=\(allowsCellular)")
         try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
             self.progressHandler = progress
@@ -115,6 +116,7 @@ final class DownloadTransfer: NSObject, URLSessionDownloadDelegate, @unchecked S
     ) {
         if let response = downloadTask.response as? HTTPURLResponse,
            !(200...299).contains(response.statusCode) {
+            DiagnosticLogger.shared.warning("下载 HTTP 失败; host=\(response.url?.host ?? "unknown"); HTTP=\(response.statusCode)")
             finish(.failure(DownloaderError.badHTTPStatus(response.statusCode)))
             return
         }
@@ -124,14 +126,20 @@ final class DownloadTransfer: NSObject, URLSessionDownloadDelegate, @unchecked S
             .appendingPathExtension(fileExtension)
         do {
             try FileManager.default.moveItem(at: location, to: destination)
+            let size = (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            DiagnosticLogger.shared.info("后台下载完成; host=\(downloadTask.originalRequest?.url?.host ?? "unknown"); bytes=\(size)")
             finish(.success(destination))
         } catch {
+            DiagnosticLogger.shared.error(error, stage: "移动后台下载临时文件")
             finish(.failure(error))
         }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error { finish(.failure(error)) }
+        if let error {
+            DiagnosticLogger.shared.error(error, stage: "后台下载 URLSession")
+            finish(.failure(error))
+        }
     }
 
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
@@ -156,6 +164,7 @@ enum MediaFileBuilder {
         title: String,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> URL {
+        DiagnosticLogger.shared.info("准备 AVFoundation 合并; video=\(videoURL.lastPathComponent); audio=\(audioURL.lastPathComponent)")
         let videoAsset = AVURLAsset(url: videoURL)
         let audioAsset = AVURLAsset(url: audioURL)
         let composition = AVMutableComposition()
@@ -197,6 +206,7 @@ enum MediaFileBuilder {
         exporter.outputFileType = .mov
         exporter.shouldOptimizeForNetworkUse = true
         try await export(exporter, progress: progress)
+        DiagnosticLogger.shared.info("AVFoundation 导出完成; output=\(output.lastPathComponent)")
         return output
     }
 
@@ -225,6 +235,9 @@ enum MediaFileBuilder {
                     progress(1)
                     continuation.resume()
                 case .failed, .cancelled:
+                    if let error = exporter.error {
+                        DiagnosticLogger.shared.error(error, stage: "AVFoundation 导出")
+                    }
                     continuation.resume(throwing: DownloaderError.mergeFailed(
                         exporter.error?.localizedDescription ?? "导出被取消"
                     ))

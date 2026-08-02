@@ -68,6 +68,13 @@ final class DownloadViewModel: ObservableObject {
         etaText = "--"
         transferredText = "--"
         statusText = "服务器正在解析格式"
+        DiagnosticLogger.shared.beginSession(
+            urlText: urlText,
+            endpoint: endpoint,
+            kind: kind,
+            quality: quality
+        )
+        DiagnosticLogger.shared.info("开始请求解析服务器")
 
         Task {
             do {
@@ -77,6 +84,7 @@ final class DownloadViewModel: ObservableObject {
                     kind: kind,
                     endpoint: endpoint
                 )
+                DiagnosticLogger.shared.info("解析成功; videoID=\(media.videoID); title=\(media.title)")
                 DownloadActivityManager.shared.start(
                     title: media.title,
                     kind: kind.rawValue,
@@ -94,6 +102,7 @@ final class DownloadViewModel: ObservableObject {
                     let audioWeight = 0.90 - videoWeight
 
                     statusText = resolutionText(video) + " · 下载视频"
+                    DiagnosticLogger.shared.info("开始下载视频; \(sourceDescription(video))")
                     let videoFile = try await downloadWithFallback(
                         source: video
                     ) { [weak self] value in
@@ -103,6 +112,7 @@ final class DownloadViewModel: ObservableObject {
                     }
 
                     statusText = "下载 AAC 音频"
+                    DiagnosticLogger.shared.info("开始下载音频; \(sourceDescription(media.audio))")
                     let audioFile = try await downloadWithFallback(
                         source: media.audio
                     ) { [weak self] value in
@@ -112,6 +122,7 @@ final class DownloadViewModel: ObservableObject {
                     }
 
                     statusText = "iPhone 正在合并并转换 MOV"
+                    DiagnosticLogger.shared.info("音视频下载完成，开始本机 MOV 转换")
                     progress = 0.90
                     speedText = "本机转换"
                     etaText = "转换 0%"
@@ -140,9 +151,11 @@ final class DownloadViewModel: ObservableObject {
                     }
                     try? FileManager.default.removeItem(at: videoFile)
                     try? FileManager.default.removeItem(at: audioFile)
+                    DiagnosticLogger.shared.info("MOV 转换完成; file=\(output.lastPathComponent); bytes=\(fileBytes(output))")
 
                 case .audio:
                     statusText = "下载 AAC 音频"
+                    DiagnosticLogger.shared.info("开始下载音频; \(sourceDescription(media.audio))")
                     let audioFile = try await downloadWithFallback(
                         source: media.audio
                     ) { [weak self] value in
@@ -151,6 +164,7 @@ final class DownloadViewModel: ObservableObject {
                         }
                     }
                     output = try MediaFileBuilder.saveAudio(sourceURL: audioFile, title: media.title)
+                    DiagnosticLogger.shared.info("音频保存完成; file=\(output.lastPathComponent); bytes=\(fileBytes(output))")
                 }
 
                 latestFile = output
@@ -166,9 +180,11 @@ final class DownloadViewModel: ObservableObject {
                     updateActivity(force: true)
                     do {
                         try await saveVideoToPhotos(output)
+                        DiagnosticLogger.shared.info("照片图库保存成功")
                         statusText = "完成，MOV 已自动保存到照片"
                         notificationBody = "已保存到照片：\(output.lastPathComponent)"
                     } catch {
+                        DiagnosticLogger.shared.error(error, stage: "保存到照片")
                         alertTitle = "自动保存失败"
                         errorText = error.localizedDescription
                         statusText = "MOV 已完成，但自动保存到照片失败"
@@ -189,6 +205,7 @@ final class DownloadViewModel: ObservableObject {
                     enabled: notificationsEnabled
                 )
             } catch {
+                DiagnosticLogger.shared.error(error, stage: statusText)
                 alertTitle = "下载失败"
                 errorText = error.localizedDescription
                 statusText = "下载失败"
@@ -265,8 +282,10 @@ final class DownloadViewModel: ObservableObject {
                 progress: progress
             )
         } catch {
+            DiagnosticLogger.shared.error(error, stage: "主下载源")
             guard let fallbackURL = source.fallbackURL else { throw error }
             statusText = "Google 直连不可用，切换服务器中转"
+            DiagnosticLogger.shared.warning("主下载源失败，切换服务器中转; host=\(fallbackURL.host ?? "unknown")")
             let fallbackSource = MediaSource(
                 url: fallbackURL,
                 fallbackURL: nil,
@@ -301,6 +320,18 @@ final class DownloadViewModel: ObservableObject {
         guard let width = source.width, let height = source.height else { return "H.264" }
         let fps = source.fps.map { " · \($0)fps" } ?? ""
         return "\(width)×\(height)\(fps) · H.264"
+    }
+
+    private func sourceDescription(_ source: MediaSource) -> String {
+        let size = source.contentLength.map { String($0) } ?? "unknown"
+        let resolution = source.width.flatMap { width in
+            source.height.map { "\(width)x\($0)" }
+        } ?? "audio"
+        return "host=\(source.url.host ?? "unknown"); codec=\(source.codec); resolution=\(resolution); bytes=\(size); fallback=\(source.fallbackURL != nil)"
+    }
+
+    private func fileBytes(_ url: URL) -> Int {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
     }
 
     private func saveVideoToPhotos(_ fileURL: URL) async throws {

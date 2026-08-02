@@ -41,6 +41,10 @@ struct ContentView: View {
                 set: { if !$0 { model.cancelMessage() } }
             )) {
                 Button("知道了", role: .cancel) { model.cancelMessage() }
+                Button("复制详细日志") {
+                    UIPasteboard.general.string = DiagnosticLogger.shared.text()
+                    model.cancelMessage()
+                }
             } message: {
                 Text(model.errorText ?? "未知错误")
             }
@@ -281,10 +285,18 @@ private struct SettingsView: View {
                     LabeledContent("版本", value: appVersion)
                 }
 
+                Section("诊断") {
+                    NavigationLink {
+                        DiagnosticLogView()
+                    } label: {
+                        Label("详细错误日志", systemImage: "doc.text.magnifyingglass")
+                    }
+                }
+
                 Section("更新日志") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("2.2").font(.headline)
-                        Text("• MOV 转换完成后自动保存到照片\n• 首次使用只请求一次照片写入权限\n• 不再强制打开手动保存弹窗\n• App 文件中仍保留原文件备份")
+                        Text("2.3").font(.headline)
+                        Text("• 增加详细错误日志，可复制和清空\n• 记录解析、下载、转码和照片保存阶段\n• 记录 HTTP 状态、错误域、错误码和底层错误\n• 自动隐藏媒体签名链接")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -302,9 +314,53 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.2"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "8"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.3"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "9"
         return "\(version) (\(build))"
+    }
+}
+
+private struct DiagnosticLogView: View {
+    @State private var logText = "正在读取…"
+    @State private var copied = false
+
+    var body: some View {
+        ScrollView {
+            Text(logText)
+                .font(.system(size: 11, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+        }
+        .navigationTitle("详细错误日志")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                Button {
+                    logText = DiagnosticLogger.shared.text()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                Button {
+                    UIPasteboard.general.string = logText
+                    copied = true
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                Button(role: .destructive) {
+                    DiagnosticLogger.shared.clear()
+                    logText = "暂无日志"
+                } label: {
+                    Image(systemName: "trash")
+                }
+            }
+        }
+        .onAppear { logText = DiagnosticLogger.shared.text() }
+        .alert("已复制", isPresented: $copied) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text("完整日志已复制到剪贴板。")
+        }
     }
 }
 
