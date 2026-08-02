@@ -52,7 +52,7 @@ final class ComponentDownloadTransfer: NSObject, URLSessionDownloadDelegate, @un
             var request = URLRequest(url: url)
             request.timeoutInterval = 60
             request.cachePolicy = .reloadIgnoringLocalCacheData
-            request.setValue("YouTubeNativeDownloader/3.0", forHTTPHeaderField: "User-Agent")
+            request.setValue("YouTubeNativeDownloader/3.1", forHTTPHeaderField: "User-Agent")
             session.downloadTask(with: request).resume()
         }
     }
@@ -104,7 +104,7 @@ final class ComponentDownloadTransfer: NSObject, URLSessionDownloadDelegate, @un
         }
 
         let temporaryURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ffmpeg-(UUID().uuidString)")
+            .appendingPathComponent("ffmpeg-\(UUID().uuidString)")
             .appendingPathExtension("wasm")
         do {
             try FileManager.default.moveItem(at: location, to: temporaryURL)
@@ -132,11 +132,11 @@ final class ComponentDownloadTransfer: NSObject, URLSessionDownloadDelegate, @un
 final class FFmpegComponentManager: ObservableObject {
     static let shared = FFmpegComponentManager()
 
-    static let componentVersion = "ffmpeg-full-0.1"
-    static let expectedBytes: Int64 = 19_674_902
-    static let expectedSHA256 = "b3cae5812af0c997cd0ca05aa3eab8b450713e4c9c5872bb63836c94324d41aa"
+    static let componentVersion = "ffmpeg-wasi-5.1.7-r1"
+    static let expectedBytes: Int64 = 17_147_310
+    static let expectedSHA256 = "350bc217d25ab9226b5a064eaabd82354496e3a409f8be77a61e12271179f308"
     static let downloadURL = URL(
-        string: "https://github.com/holzschu/a-Shell-commands/releases/download/0.1/ffmpeg.wasm"
+        string: "https://youtube.789113.cn/components/ffmpeg-wasi-5.1.7-r1.wasm"
     )!
 
     @Published private(set) var state: FFmpegComponentState
@@ -173,19 +173,39 @@ final class FFmpegComponentManager: ObservableObject {
         progress = 0
         speedText = "测速中"
         etaText = "计算中"
-        transferredText = "0 MB / (Self.sizeText(Self.expectedBytes))"
+        transferredText = "0 MB / \(Self.sizeText(Self.expectedBytes))"
         DiagnosticLogger.shared.info("开始下载完整 FFmpeg WASM 组件; version=\(Self.componentVersion); bytes=\(Self.expectedBytes)")
 
-        let transfer = ComponentDownloadTransfer()
-        activeTransfer = transfer
         Task {
             do {
-                let temporaryURL = try await transfer.download(
-                    from: Self.downloadURL,
-                    expectedLength: Self.expectedBytes,
-                    allowsCellular: allowsCellular
-                ) { [weak self] value in
-                    Task { @MainActor in self?.apply(value) }
+                var downloadedURL: URL?
+                for attempt in 1...3 {
+                    let transfer = ComponentDownloadTransfer()
+                    activeTransfer = transfer
+                    do {
+                        downloadedURL = try await transfer.download(
+                            from: Self.downloadURL,
+                            expectedLength: Self.expectedBytes,
+                            allowsCellular: allowsCellular
+                        ) { [weak self] value in
+                            Task { @MainActor in self?.apply(value) }
+                        }
+                        break
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        guard attempt < 3 else { throw error }
+                        DiagnosticLogger.shared.warning(
+                            "FFmpeg WASI 组件下载中断，自动重试 \(attempt)/2；\(error.localizedDescription)"
+                        )
+                        speedText = "正在重连"
+                        etaText = "第 \(attempt) 次重试"
+                        try await Task.sleep(for: .seconds(1))
+                    }
+                }
+
+                guard let temporaryURL = downloadedURL else {
+                    throw DownloaderError.componentInvalid("组件下载没有生成临时文件")
                 }
                 activeTransfer = nil
                 state = .verifying

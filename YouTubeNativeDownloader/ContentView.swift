@@ -49,7 +49,7 @@ struct ContentView: View {
                 }
                 Button("暂不下载", role: .cancel) {}
             } message: {
-                Text("高清视频需要在 iPhone 本机合并。完整组件约 19.7 MB，只下载一次，可在设置中更新或删除。")
+                Text("高清视频需要在 iPhone 本机合并。标准 WASI 完整组件约 17.1 MB，只下载一次，可在设置中更新或删除。")
             }
             .alert(model.alertTitle, isPresented: Binding(
                 get: { model.errorText != nil },
@@ -513,7 +513,7 @@ private struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(ffmpeg.isInstalled ? "完整 FFmpeg 已安装" : "完整 FFmpeg 未安装")
                                 .font(.subheadline.weight(.semibold))
-                            Text(ffmpeg.isInstalled ? "\(FFmpegComponentManager.componentVersion) · \(ffmpeg.installedSizeText)" : "高清视频合并需要下载约 19.7 MB")
+                            Text(ffmpeg.isInstalled ? "\(FFmpegComponentManager.componentVersion) · \(ffmpeg.installedSizeText)" : "高清视频合并需要下载约 17.1 MB")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -586,8 +586,8 @@ private struct SettingsView: View {
 
                 Section("更新日志") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("3.0").font(.headline)
-                        Text("• 首次启动可下载完整 FFmpeg WASM 组件\n• 视频和 AAC 完整下载后由 FFmpeg 无损合并 MP4\n• 增加组件进度、速度、校验、重装和删除")
+                        Text("3.1").font(.headline)
+                        Text("• 替换不兼容的 a-Shell 私有 FFmpeg，改用标准 WASI FFmpeg 5.1.7\n• 使用独立沙盒工作目录无损合并 MP4\n• 合并失败日志增加组件版本、输入和输出字节数")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -607,8 +607,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "3.0"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "16"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "3.1"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "17"
         return "\(version) (\(build))"
     }
 }

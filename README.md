@@ -1,13 +1,13 @@
 # 本地下载器 iOS
 
-原生 SwiftUI YouTube 下载器，支持 iOS 16.1–26。解析由服务器上的 `yt-dlp` 完成，下载、进度展示和音视频合并由 iPhone 处理。
+原生 SwiftUI YouTube 下载器，支持 iOS 16.1 及以上版本（含 iOS 26）。解析由服务器上的 `yt-dlp` 完成，下载、进度展示和音视频合并由 iPhone 处理。
 
-## 3.0 功能
+## 3.1 功能
 
 - 标准 YouTube、`youtu.be`、Shorts、Embed 和 Live 链接。
 - H.264 视频 + AAC 音频，避免白屏只有声音。
 - 最佳画质、1080P、720P、480P；视频下载后由 iPhone 使用 FFmpeg 无损合并为 MP4，音频保存为 M4A。
-- 首次启动由用户选择是否下载完整 FFmpeg WASM 组件（约 19.7 MB），IPA 本身不携带 FFmpeg。
+- 首次启动由用户选择是否下载标准 WASI FFmpeg 5.1.7 完整组件（约 17.1 MB），IPA 本身不携带 FFmpeg。
 - 组件支持下载进度、速度、剩余时间、SHA-256 校验、重装和删除。
 - 服务器解析、视频、AAC 和 FFmpeg 合并按当前阶段只显示当前进度条。
 - 明亮液态玻璃界面，重做下载入口、任务状态和本机文件卡片。
@@ -34,6 +34,14 @@
 - `youtube-ios-resolver.nginx.conf`：Nginx 路由。
 
 App 设置中可以修改解析接口地址。iPhone 优先直连媒体；服务器不运行 FFmpeg、不生成或永久保存视频，仅在直链受限时流式中转。
+
+## FFmpeg WASI 组件
+
+App 不再使用 a-Shell 专用的旧 `ffmpeg.wasm`。当前组件由 `server/build-ffmpeg-wasi.sh` 使用 wasi-sdk 33 和 FFmpeg 5.1.7 可复现构建，并通过标准 Wasmtime 的真实 1080p H.264 + AAC 无损合并测试。
+
+组件地址：`https://youtube.789113.cn/components/ffmpeg-wasi-5.1.7-r1.wasm`
+
+SHA-256：`350bc217d25ab9226b5a064eaabd82354496e3a409f8be77a61e12271179f308`
 
 ## Codemagic 无 Xcode 打包
 

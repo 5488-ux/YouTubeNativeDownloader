@@ -23,12 +23,17 @@ enum FFmpegWasmRunner {
         let workDirectory = temporaryRoot
             .appendingPathComponent("ffmpeg-merge-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
+        let localVideo = workDirectory.appendingPathComponent("video.mp4")
+        let localAudio = workDirectory.appendingPathComponent("audio.m4a")
         let wasmOutput = workDirectory.appendingPathComponent("merged.mp4")
         defer { try? FileManager.default.removeItem(at: workDirectory) }
 
-        let videoGuestPath = "/tmp/\(videoURL.lastPathComponent)"
-        let audioGuestPath = "/tmp/\(audioURL.lastPathComponent)"
-        let outputGuestPath = "/tmp/\(workDirectory.lastPathComponent)/merged.mp4"
+        try FileManager.default.copyItem(at: videoURL, to: localVideo)
+        try FileManager.default.copyItem(at: audioURL, to: localAudio)
+
+        let videoGuestPath = "/work/video.mp4"
+        let audioGuestPath = "/work/audio.m4a"
+        let outputGuestPath = "/work/merged.mp4"
         let inputBytes = max(1, fileBytes(videoURL) + fileBytes(audioURL))
 
         DiagnosticLogger.shared.info(
@@ -67,8 +72,8 @@ enum FFmpegWasmRunner {
             ]
             let wasi = try WASIBridgeToHost(
                 args: arguments,
-                environment: ["HOME": "/tmp"],
-                preopens: ["/tmp": temporaryRoot.path]
+                environment: ["HOME": "/work", "TMPDIR": "/work"],
+                preopens: ["/work": workDirectory.path]
             )
             let engine = Engine()
             let store = Store(engine: engine)
@@ -77,7 +82,11 @@ enum FFmpegWasmRunner {
             let instance = try module.instantiate(store: store, imports: imports)
             let exitCode = try wasi.start(instance)
             guard exitCode == 0 else {
-                throw DownloaderError.mergeFailed("FFmpeg 返回状态码 \(exitCode)")
+                throw DownloaderError.mergeFailed(
+                    "FFmpeg WASI 返回状态码 \(exitCode)；组件=\(FFmpegComponentManager.componentVersion)；" +
+                    "videoBytes=\(fileBytes(localVideo))；audioBytes=\(fileBytes(localAudio))；" +
+                    "outputBytes=\(fileBytes(wasmOutput))"
+                )
             }
         }.value
 
