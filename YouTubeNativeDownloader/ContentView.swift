@@ -483,8 +483,8 @@ private struct SettingsView: View {
 
                 Section("更新日志") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("2.7").font(.headline)
-                        Text("• 设置中新增完整功能介绍\n• 按下载、后台、本机处理和诊断分类说明")
+                        Text("2.8").font(.headline)
+                        Text("• 修复部分 MOV 中途画面冻结和声音中断\n• 按音视频轨道真实时间范围归零合并\n• 增加下载完整性和成品时间轴校验")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -504,8 +504,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.7"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "13"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.8"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "14"
         return "\(version) (\(build))"
     }
 }

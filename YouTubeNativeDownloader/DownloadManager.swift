@@ -127,6 +127,13 @@ final class DownloadTransfer: NSObject, URLSessionDownloadDelegate, @unchecked S
         do {
             try FileManager.default.moveItem(at: location, to: destination)
             let size = (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            let responseLength = downloadTask.response?.expectedContentLength ?? NSURLSessionTransferSizeUnknown
+            if responseLength > 0, Int64(size) < responseLength * 99 / 100 {
+                try? FileManager.default.removeItem(at: destination)
+                DiagnosticLogger.shared.warning("下载文件不完整; actual=\(size); expected=\(responseLength)")
+                finish(.failure(DownloaderError.downloadFailed))
+                return
+            }
             DiagnosticLogger.shared.info("后台下载完成; host=\(downloadTask.originalRequest?.url?.host ?? "unknown"); bytes=\(size)")
             finish(.success(destination))
         } catch {
@@ -165,8 +172,9 @@ enum MediaFileBuilder {
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> URL {
         DiagnosticLogger.shared.info("准备 AVFoundation 合并; video=\(videoURL.lastPathComponent); audio=\(audioURL.lastPathComponent)")
-        let videoAsset = AVURLAsset(url: videoURL)
-        let audioAsset = AVURLAsset(url: audioURL)
+        let preciseTiming = [AVURLAssetPreferPreciseDurationAndTimingKey: true]
+        let videoAsset = AVURLAsset(url: videoURL, options: preciseTiming)
+        let audioAsset = AVURLAsset(url: audioURL, options: preciseTiming)
         let composition = AVMutableComposition()
 
         guard let sourceVideoTrack = try await videoAsset.loadTracks(withMediaType: .video).first,
@@ -176,13 +184,10 @@ enum MediaFileBuilder {
               ) else {
             throw DownloaderError.mergeFailed("读取不到视频轨道")
         }
-        let videoDuration = try await videoAsset.load(.duration)
-        try targetVideoTrack.insertTimeRange(
-            CMTimeRange(start: .zero, duration: videoDuration),
-            of: sourceVideoTrack,
-            at: .zero
-        )
-        targetVideoTrack.preferredTransform = try await sourceVideoTrack.load(.preferredTransform)
+        let videoTimeRange = try await sourceVideoTrack.load(.timeRange)
+        guard Self.isUsable(videoTimeRange) else {
+            throw DownloaderError.mergeFailed("视频轨道时间范围无效")
+        }
 
         guard let sourceAudioTrack = try await audioAsset.loadTracks(withMediaType: .audio).first,
               let targetAudioTrack = composition.addMutableTrack(
@@ -191,9 +196,33 @@ enum MediaFileBuilder {
               ) else {
             throw DownloaderError.mergeFailed("读取不到音频轨道")
         }
-        let audioDuration = try await audioAsset.load(.duration)
+        let audioTimeRange = try await sourceAudioTrack.load(.timeRange)
+        guard Self.isUsable(audioTimeRange) else {
+            throw DownloaderError.mergeFailed("音频轨道时间范围无效")
+        }
+
+        let commonDuration = CMTimeMinimum(videoTimeRange.duration, audioTimeRange.duration)
+        guard commonDuration.isNumeric, CMTimeCompare(commonDuration, .zero) > 0 else {
+            throw DownloaderError.mergeFailed("音视频共同时间范围无效")
+        }
+        let normalizedRange = CMTimeRange(start: .zero, duration: commonDuration)
+        DiagnosticLogger.shared.info(
+            "轨道时间轴; videoStart=\(CMTimeGetSeconds(videoTimeRange.start)); " +
+            "videoDuration=\(CMTimeGetSeconds(videoTimeRange.duration)); " +
+            "audioStart=\(CMTimeGetSeconds(audioTimeRange.start)); " +
+            "audioDuration=\(CMTimeGetSeconds(audioTimeRange.duration)); " +
+            "outputDuration=\(CMTimeGetSeconds(commonDuration))"
+        )
+
+        try targetVideoTrack.insertTimeRange(
+            CMTimeRange(start: videoTimeRange.start, duration: commonDuration),
+            of: sourceVideoTrack,
+            at: .zero
+        )
+        targetVideoTrack.preferredTransform = try await sourceVideoTrack.load(.preferredTransform)
+
         try targetAudioTrack.insertTimeRange(
-            CMTimeRange(start: .zero, duration: CMTimeMinimum(videoDuration, audioDuration)),
+            CMTimeRange(start: audioTimeRange.start, duration: commonDuration),
             of: sourceAudioTrack,
             at: .zero
         )
@@ -204,8 +233,10 @@ enum MediaFileBuilder {
         let output = uniqueDocumentURL(title: title, extension: "mov")
         exporter.outputURL = output
         exporter.outputFileType = .mov
+        exporter.timeRange = normalizedRange
         exporter.shouldOptimizeForNetworkUse = true
         try await export(exporter, progress: progress)
+        try await validateOutput(output, expectedDuration: commonDuration)
         DiagnosticLogger.shared.info("AVFoundation 导出完成; output=\(output.lastPathComponent)")
         return output
     }
@@ -246,6 +277,37 @@ enum MediaFileBuilder {
                 }
             }
         }
+    }
+
+    private static func validateOutput(_ output: URL, expectedDuration: CMTime) async throws {
+        let asset = AVURLAsset(
+            url: output,
+            options: [AVURLAssetPreferPreciseDurationAndTimingKey: true]
+        )
+        let playable = try await asset.load(.isPlayable)
+        let duration = try await asset.load(.duration)
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        let actualSeconds = CMTimeGetSeconds(duration)
+        let expectedSeconds = CMTimeGetSeconds(expectedDuration)
+        guard playable,
+              !videoTracks.isEmpty,
+              !audioTracks.isEmpty,
+              actualSeconds.isFinite,
+              abs(actualSeconds - expectedSeconds) <= 0.75 else {
+            try? FileManager.default.removeItem(at: output)
+            throw DownloaderError.mergeFailed(
+                "成品时间轴校验失败（输出 \(actualSeconds) 秒，预期 \(expectedSeconds) 秒）"
+            )
+        }
+        DiagnosticLogger.shared.info("MOV 校验通过; duration=\(actualSeconds); videoTracks=\(videoTracks.count); audioTracks=\(audioTracks.count)")
+    }
+
+    private static func isUsable(_ range: CMTimeRange) -> Bool {
+        range.isValid &&
+        range.start.isNumeric &&
+        range.duration.isNumeric &&
+        CMTimeCompare(range.duration, .zero) > 0
     }
 
     private static func uniqueDocumentURL(title: String, extension fileExtension: String) -> URL {
