@@ -17,9 +17,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.4</string>
+    <string>2.5</string>
     <key>CFBundleVersion</key>
-    <string>10</string>
+    <string>11</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>用于在 MOV 转换完成后自动保存视频到你的照片图库。</string>
     <key>CFBundleURLTypes</key>

@@ -9,25 +9,20 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.91, green: 0.97, blue: 1.0),
-                        Color(red: 0.83, green: 0.89, blue: 1.0)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+                appBackground
 
                 ScrollView {
-                    VStack(spacing: 18) {
+                    VStack(spacing: 16) {
                         header
                         composer
                         progressCard
                         filesCard
                     }
-                    .padding(16)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 36)
                 }
+                .scrollDismissesKeyboard(.interactively)
             }
             .navigationBarHidden(true)
             .sheet(item: $shareItem) { item in
@@ -51,55 +46,118 @@ struct ContentView: View {
         }
     }
 
+    private var appBackground: some View {
+        ZStack {
+            Color(red: 0.94, green: 0.97, blue: 1.0)
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(0.9),
+                    Color(red: 0.86, green: 0.92, blue: 1.0),
+                    Color(red: 0.92, green: 0.88, blue: 1.0).opacity(0.72)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Circle()
+                .fill(Color.cyan.opacity(0.2))
+                .frame(width: 260, height: 260)
+                .blur(radius: 24)
+                .offset(x: 150, y: -260)
+            Circle()
+                .fill(Color.indigo.opacity(0.16))
+                .frame(width: 300, height: 300)
+                .blur(radius: 36)
+                .offset(x: -170, y: 320)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
+
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 13) {
             ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.blue.gradient)
-                    .frame(width: 50, height: 50)
-                Image(systemName: "arrow.down.circle.fill")
-                    .font(.system(size: 27, weight: .semibold))
+                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(red: 0.13, green: 0.48, blue: 1.0), .indigo],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 56, height: 56)
+                    .shadow(color: .blue.opacity(0.3), radius: 14, y: 8)
+                Image(systemName: "arrow.down.to.line.compact")
+                    .font(.system(size: 25, weight: .bold))
                     .foregroundStyle(.white)
             }
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text("本地下载器")
-                    .font(.system(size: 27, weight: .bold, design: .rounded))
-                Text("服务器解析 · 手机后台高速下载")
-                    .font(.footnote)
+                    .font(.system(size: 26, weight: .heavy, design: .rounded))
+                Text("清晰画质 · 后台下载 · 自动存相册")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
             }
             Spacer()
             Button {
                 showingSettings = true
             } label: {
                 Image(systemName: "gearshape.fill")
-                    .font(.title3)
-                    .frame(width: 42, height: 42)
-                    .background(.ultraThinMaterial, in: Circle())
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.primary.opacity(0.72))
+                    .frame(width: 44, height: 44)
+                    .background(.white.opacity(0.58), in: Circle())
+                    .overlay { Circle().stroke(.white.opacity(0.9), lineWidth: 1) }
+                    .shadow(color: .black.opacity(0.06), radius: 10, y: 5)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("设置")
         }
-        .padding(.top, 8)
+        .padding(.vertical, 8)
     }
 
     private var composer: some View {
-        VStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("新建下载")
+                        .font(.title3.weight(.bold))
+                    Text("粘贴 YouTube 视频或 Shorts 链接")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "link.badge.plus")
+                    .font(.title2)
+                    .foregroundStyle(.blue)
+            }
+
             HStack(spacing: 10) {
-                TextField("粘贴 YouTube 或 Shorts 链接", text: $model.urlText, axis: .vertical)
+                Image(systemName: "link")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.blue)
+                TextField("https://youtube.com/…", text: $model.urlText, axis: .vertical)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
-                    .lineLimit(2...4)
-                    .padding(14)
-                    .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .lineLimit(1...3)
 
-                Button("粘贴") {
+                Button {
                     model.urlText = UIPasteboard.general.string ?? ""
+                } label: {
+                    Image(systemName: "doc.on.clipboard.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .background(Color.blue.gradient, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                 }
-                .buttonStyle(.bordered)
-                .tint(.blue)
+                .buttonStyle(.plain)
+                .accessibilityLabel("粘贴")
             }
+            .padding(11)
+            .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(.white.opacity(0.9), lineWidth: 1) }
 
             Picker("类型", selection: $model.kind) {
                 ForEach(DownloadKind.allCases) { item in
@@ -107,10 +165,12 @@ struct ContentView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .disabled(model.isBusy)
 
             if model.kind == .video {
                 HStack {
-                    Label("最高画质", systemImage: "sparkles.tv")
+                    Label("视频画质", systemImage: "sparkles.tv")
+                        .font(.subheadline.weight(.semibold))
                     Spacer()
                     Picker("画质", selection: $model.quality) {
                         ForEach(VideoQuality.allCases) { item in
@@ -118,34 +178,65 @@ struct ContentView: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .disabled(model.isBusy)
                 }
-                .padding(14)
-                .background(.white.opacity(0.66), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .padding(13)
+                .background(.white.opacity(0.58), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
             }
 
             Button(action: model.start) {
-                HStack {
+                HStack(spacing: 9) {
                     if model.isBusy {
                         ProgressView().tint(.white)
                     } else {
-                        Image(systemName: "arrow.down.to.line.compact")
+                        Image(systemName: "arrow.down.circle.fill")
                     }
-                    Text(model.isBusy ? "正在处理" : "开始下载")
-                        .fontWeight(.bold)
+                    Text(model.isBusy ? "正在处理，请稍候" : "开始下载")
+                        .font(.headline)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 15)
+                .padding(.vertical, 16)
+                .foregroundStyle(.white)
+                .background(
+                    LinearGradient(
+                        colors: [Color(red: 0.08, green: 0.52, blue: 1.0), .indigo],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    ),
+                    in: RoundedRectangle(cornerRadius: 17, style: .continuous)
+                )
+                .shadow(color: .blue.opacity(0.28), radius: 16, y: 9)
             }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.roundedRectangle(radius: 17))
+            .buttonStyle(.plain)
             .disabled(model.isBusy || model.urlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .opacity(model.isBusy || model.urlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.55 : 1)
         }
         .glassCard()
     }
 
     private var progressCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("任务状态").font(.headline)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("下载任务")
+                        .font(.title3.weight(.bold))
+                    Text(model.statusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer()
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(model.isBusy ? Color.orange : (model.progress >= 1 ? Color.green : Color.secondary.opacity(0.45)))
+                        .frame(width: 7, height: 7)
+                    Text(model.isBusy ? "进行中" : (model.progress >= 1 ? "已完成" : "等待中"))
+                        .font(.caption2.weight(.bold))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(.white.opacity(0.62), in: Capsule())
+            }
 
             if model.kind == .video {
                 phaseProgress(
@@ -177,27 +268,31 @@ struct ContentView: View {
                 )
             }
 
-            Text(model.statusText)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
             HStack(spacing: 10) {
                 metric(title: "速度", value: model.speedText, icon: "speedometer")
                 metric(title: "时间", value: model.etaText, icon: "clock")
             }
-            Text(model.transferredText)
+            if model.transferredText != "--" {
+                HStack(spacing: 6) {
+                    Image(systemName: "externaldrive.fill")
+                    Text(model.transferredText)
+                }
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
+            }
 
             if let file = model.latestFile {
                 Button {
                     shareItem = ShareItem(fileURL: file)
                 } label: {
-                    Label("再次分享或导出", systemImage: "square.and.arrow.up")
+                    Label("打开分享与导出", systemImage: "square.and.arrow.up")
+                        .font(.subheadline.weight(.bold))
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.green)
+                .buttonBorderShape(.roundedRectangle(radius: 14))
             }
         }
         .glassCard()
@@ -209,70 +304,100 @@ struct ContentView: View {
         icon: String,
         color: Color
     ) -> some View {
-        VStack(spacing: 7) {
-            HStack {
-                Label(title, systemImage: icon)
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Text("\(Int(min(1, max(0, value)) * 100))%")
-                    .font(.caption.monospacedDigit().weight(.bold))
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(color.opacity(0.12))
+                    .frame(width: 42, height: 42)
+                Image(systemName: icon)
+                    .font(.system(size: 17, weight: .bold))
                     .foregroundStyle(color)
             }
-            ProgressView(value: value)
-                .tint(color)
+            VStack(spacing: 7) {
+                HStack {
+                    Text(title)
+                        .font(.subheadline.weight(.bold))
+                    Spacer()
+                    Text("\(Int(min(1, max(0, value)) * 100))%")
+                        .font(.caption.monospacedDigit().weight(.bold))
+                        .foregroundStyle(color)
+                }
+                ProgressView(value: value)
+                    .tint(color)
+                    .scaleEffect(x: 1, y: 1.25, anchor: .center)
+            }
         }
         .padding(12)
-        .background(.white.opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(.white.opacity(0.54), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(.white.opacity(0.72), lineWidth: 1) }
     }
 
     private func metric(title: String, value: String, icon: String) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.blue)
+                .frame(width: 32, height: 32)
+                .background(.blue.opacity(0.1), in: Circle())
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.caption2).foregroundStyle(.secondary)
+                Text(title).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
                 Text(value)
-                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .font(.caption.monospacedDigit().weight(.bold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
             }
             Spacer(minLength: 0)
         }
-        .padding(10)
+        .padding(11)
         .frame(maxWidth: .infinity)
-        .background(.white.opacity(0.5), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .background(.white.opacity(0.5), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
     }
 
     private var filesCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("本机文件").font(.headline)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("本机文件")
+                        .font(.title3.weight(.bold))
+                    Text("转换完成的文件会保留在这里")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Text("\(model.savedFiles.count)")
                     .font(.caption.bold())
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(.blue.opacity(0.12), in: Capsule())
+                    .foregroundStyle(.blue)
+                    .frame(width: 32, height: 32)
+                    .background(.blue.opacity(0.1), in: Circle())
             }
 
             if model.savedFiles.isEmpty {
                 VStack(spacing: 8) {
-                    Image(systemName: "tray")
-                        .font(.system(size: 30))
-                        .foregroundStyle(.secondary)
+                    ZStack {
+                        Circle()
+                            .fill(.blue.opacity(0.08))
+                            .frame(width: 66, height: 66)
+                        Image(systemName: "tray.fill")
+                            .font(.system(size: 27))
+                            .foregroundStyle(.blue.opacity(0.7))
+                    }
                     Text("暂无文件").font(.headline)
-                    Text("完成的下载会出现在这里")
+                    Text("粘贴链接，开始你的第一次下载")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                .padding(.vertical, 20)
+                .padding(.vertical, 24)
                 .frame(maxWidth: .infinity)
             } else {
                 ForEach(model.savedFiles, id: \.self) { file in
                     HStack(spacing: 10) {
-                        Image(systemName: file.pathExtension.lowercased() == "m4a" ? "waveform" : "film.fill")
-                            .foregroundStyle(.blue)
-                            .frame(width: 28)
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                .fill(file.pathExtension.lowercased() == "m4a" ? Color.purple.opacity(0.12) : Color.blue.opacity(0.12))
+                                .frame(width: 46, height: 46)
+                            Image(systemName: file.pathExtension.lowercased() == "m4a" ? "waveform" : "film.fill")
+                                .foregroundStyle(file.pathExtension.lowercased() == "m4a" ? Color.purple : Color.blue)
+                        }
                         VStack(alignment: .leading, spacing: 3) {
                             Text(file.deletingPathExtension().lastPathComponent)
                                 .font(.subheadline.weight(.semibold))
@@ -282,15 +407,23 @@ struct ContentView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button { shareItem = ShareItem(fileURL: file) } label: {
-                            Image(systemName: "square.and.arrow.up")
-                        }
-                        Button(role: .destructive) { model.delete(file) } label: {
-                            Image(systemName: "trash")
+                        Menu {
+                            Button { shareItem = ShareItem(fileURL: file) } label: {
+                                Label("分享或导出", systemImage: "square.and.arrow.up")
+                            }
+                            Button(role: .destructive) { model.delete(file) } label: {
+                                Label("删除文件", systemImage: "trash")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 36, height: 36)
+                                .background(.white.opacity(0.62), in: Circle())
                         }
                     }
-                    .padding(.vertical, 7)
-                    if file != model.savedFiles.last { Divider() }
+                    .padding(11)
+                    .background(.white.opacity(0.48), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
                 }
             }
         }
@@ -340,14 +473,16 @@ private struct SettingsView: View {
 
                 Section("更新日志") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("2.4").font(.headline)
-                        Text("• 视频与 AAC 音频改为两条独立进度条\n• MOV 本机转换使用单独进度条\n• 不再把多个阶段挤在同一条进度里")
+                        Text("2.5").font(.headline)
+                        Text("• 全新明亮液态玻璃界面\n• 强化下载入口和任务状态层级\n• 进度卡片与文件列表重新设计\n• 文件操作收进简洁菜单")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 4)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Color(red: 0.93, green: 0.96, blue: 1.0))
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -359,8 +494,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.4"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "10"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.5"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "11"
         return "\(version) (\(build))"
     }
 }
@@ -411,12 +546,20 @@ private struct DiagnosticLogView: View {
 
 private extension View {
     func glassCard() -> some View {
-        padding(16)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 25, style: .continuous))
+        padding(17)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 25, style: .continuous)
-                    .stroke(.white.opacity(0.75), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.95), .white.opacity(0.42)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
             }
+            .shadow(color: Color.indigo.opacity(0.09), radius: 22, y: 12)
     }
 }
 
