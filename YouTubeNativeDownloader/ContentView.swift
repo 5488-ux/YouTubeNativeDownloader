@@ -315,9 +315,9 @@ struct ContentView: View {
 
             if model.isBusy, model.activePhase == .resolving {
                 phaseProgress(
-                    title: "服务器解析",
+                    title: "本机解析",
                     value: model.resolveProgress,
-                    icon: "server.rack",
+                    icon: "iphone.gen3.radiowaves.left.and.right",
                     color: .blue
                 )
             } else if model.isBusy, model.activePhase == .downloadingVideo {
@@ -515,6 +515,7 @@ private struct SettingsView: View {
     @ObservedObject var model: DownloadViewModel
     @ObservedObject var ffmpeg: FFmpegComponentManager
     @Environment(\.dismiss) private var dismiss
+    @State private var cookieConfigured = YouTubeCookieStore.hasCookie
 
     var body: some View {
         NavigationStack {
@@ -568,19 +569,32 @@ private struct SettingsView: View {
                 } header: {
                     Text("本机合并组件")
                 } footer: {
-                    Text("组件保存在 App 沙盒中。服务器不运行 FFmpeg；音视频全部下载完成后，由 iPhone 使用 FFmpeg 无损封装为 MP4。")
+                    Text("组件保存在 App 沙盒中。音视频全部下载完成后，由 iPhone 使用 FFmpeg 无损封装为 MP4。")
                 }
 
                 Section {
-                    TextField("解析接口", text: $model.serverURL, axis: .vertical)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                    Button("恢复默认接口") { model.resetServerURL() }
+                    NavigationLink {
+                        CookieSettingsView {
+                            cookieConfigured = YouTubeCookieStore.hasCookie
+                        }
+                    } label: {
+                        Label {
+                            HStack {
+                                Text("YouTube Cookie")
+                                Spacer()
+                                Text(cookieConfigured ? "已设置" : "未设置")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(cookieConfigured ? Color.green : Color.orange)
+                            }
+                        } icon: {
+                            Image(systemName: cookieConfigured ? "key.fill" : "key")
+                                .foregroundStyle(cookieConfigured ? Color.green : Color.orange)
+                        }
+                    }
                 } header: {
-                    Text("解析服务器")
+                    Text("本机 YouTube 解析")
                 } footer: {
-                    Text("服务器运行 yt-dlp 解析。iPhone 优先直连媒体，地址受限时才使用临时中转；合并和保存均在本机完成。")
+                    Text("解析在 iPhone 本机完成，不再连接自建解析服务器。遇到“需要登录”时粘贴 Cookie；Cookie 只保存在本机钥匙串。")
                 }
 
                 Section("关于") {
@@ -638,14 +652,83 @@ private struct SettingsView: View {
                     Button("完成") { dismiss() }
                 }
             }
+            .onAppear {
+                cookieConfigured = YouTubeCookieStore.hasCookie
+            }
         }
         .preferredColorScheme(.light)
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "3.2"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "18"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "4.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "19"
         return "\(version) (\(build))"
+    }
+}
+
+private struct CookieSettingsView: View {
+    let onChange: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var cookieText = ""
+    @State private var message: String?
+    @State private var showingMessage = false
+
+    var body: some View {
+        Form {
+            Section {
+                TextEditor(text: $cookieText)
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(minHeight: 190)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .privacySensitive()
+            } header: {
+                Text("粘贴 Cookie")
+            } footer: {
+                Text("支持 Cookie 请求头、Netscape cookies.txt 和常见 JSON 导出格式。App 不会把 Cookie 写入日志，也不会上传到自建服务器。")
+            }
+
+            Section {
+                Button("保存到本机钥匙串") {
+                    do {
+                        try YouTubeCookieStore.save(cookieText)
+                        cookieText = YouTubeCookieStore.load() ?? ""
+                        onChange()
+                        message = cookieText.isEmpty ? "Cookie 已清空" : "Cookie 已安全保存"
+                    } catch {
+                        message = error.localizedDescription
+                    }
+                    showingMessage = true
+                }
+                .disabled(cookieText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if YouTubeCookieStore.hasCookie {
+                    Button("删除 Cookie", role: .destructive) {
+                        YouTubeCookieStore.delete()
+                        cookieText = ""
+                        onChange()
+                        message = "Cookie 已删除"
+                        showingMessage = true
+                    }
+                }
+            }
+
+            Section("怎么获取") {
+                Text("在你自己的浏览器登录 YouTube，使用 Cookie 导出工具复制 youtube.com 的 Cookie，再粘贴到这里。Cookie 等同登录凭证，不要发给任何人。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("YouTube Cookie")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            cookieText = YouTubeCookieStore.load() ?? ""
+        }
+        .alert("Cookie", isPresented: $showingMessage) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text(message ?? "操作完成")
+        }
     }
 }
 
@@ -657,6 +740,16 @@ private struct ReleaseNote: Identifiable {
     var id: String { version }
 
     static let all: [ReleaseNote] = [
+        ReleaseNote(
+            version: "4.0",
+            title: "完全本机解析",
+            changes: [
+                "移除自建 yt-dlp 解析接口和服务器媒体中转。",
+                "由 iPhone 直接请求 YouTube Innertube 并选择 H.264 与 AAC 格式。",
+                "设置中可粘贴 YouTube Cookie，并只保存到本机钥匙串。",
+                "视频、音频下载以及 FFmpeg 合并全部在手机完成。"
+            ]
+        ),
         ReleaseNote(
             version: "3.2",
             title: "明亮界面与完整更新记录",
@@ -897,7 +990,7 @@ private struct FeatureGuideView: View {
             Section("下载体验") {
                 feature(
                     "分阶段实时进度",
-                    "服务器解析、视频、AAC 和 FFmpeg 合并按当前阶段显示进度、速度与剩余时间。",
+                    "本机解析、视频、AAC 和 FFmpeg 合并按当前阶段显示进度、速度与剩余时间。",
                     "chart.bar.fill",
                     .blue
                 )
@@ -944,9 +1037,9 @@ private struct FeatureGuideView: View {
                     .gray
                 )
                 feature(
-                    "自定义解析接口",
-                    "支持修改或恢复默认解析服务器地址。",
-                    "server.rack",
+                    "本机解析与 Cookie",
+                    "iPhone 直接解析 YouTube；需要登录时可把 Cookie 安全保存到本机钥匙串。",
+                    "key.fill",
                     .blue
                 )
                 feature(

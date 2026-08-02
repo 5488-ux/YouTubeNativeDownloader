@@ -52,7 +52,7 @@ final class ComponentDownloadTransfer: NSObject, URLSessionDownloadDelegate, @un
             var request = URLRequest(url: url)
             request.timeoutInterval = 60
             request.cachePolicy = .reloadIgnoringLocalCacheData
-            request.setValue("YouTubeNativeDownloader/3.2", forHTTPHeaderField: "User-Agent")
+            request.setValue("YouTubeNativeDownloader/4.0", forHTTPHeaderField: "User-Agent")
             session.downloadTask(with: request).resume()
         }
     }
@@ -136,7 +136,7 @@ final class FFmpegComponentManager: ObservableObject {
     static let expectedBytes: Int64 = 17_147_310
     static let expectedSHA256 = "350bc217d25ab9226b5a064eaabd82354496e3a409f8be77a61e12271179f308"
     static let downloadURL = URL(
-        string: "https://youtube.789113.cn/components/ffmpeg-wasi-5.1.7-r1.wasm"
+        string: "https://raw.githubusercontent.com/5488-ux/YouTubeNativeDownloader/main/components/ffmpeg-wasi-5.1.7-r1.wasm"
     )!
 
     @Published private(set) var state: FFmpegComponentState

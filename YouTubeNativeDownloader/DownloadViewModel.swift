@@ -35,9 +35,6 @@ final class DownloadViewModel: ObservableObject {
     @Published private(set) var savedFiles: [URL] = []
     @Published private(set) var activePhase: DownloadTaskPhase = .idle
 
-    @Published var serverURL: String {
-        didSet { UserDefaults.standard.set(serverURL, forKey: Keys.serverURL) }
-    }
     @Published var allowsCellular: Bool {
         didSet { UserDefaults.standard.set(allowsCellular, forKey: Keys.allowsCellular) }
     }
@@ -57,8 +54,6 @@ final class DownloadViewModel: ObservableObject {
 
     init() {
         let defaults = UserDefaults.standard
-        serverURL = defaults.string(forKey: Keys.serverURL)
-            ?? "https://youtube.789113.cn/ios-api/resolve"
         allowsCellular = defaults.object(forKey: Keys.allowsCellular) as? Bool ?? true
         notificationsEnabled = defaults.object(forKey: Keys.notificationsEnabled) as? Bool ?? true
         liveActivityEnabled = defaults.object(forKey: Keys.liveActivityEnabled) as? Bool ?? true
@@ -73,14 +68,6 @@ final class DownloadViewModel: ObservableObject {
             errorText = DownloaderError.componentMissing.localizedDescription
             return
         }
-        let trimmedServer = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let endpoint = URL(string: trimmedServer),
-              let scheme = endpoint.scheme?.lowercased(),
-              ["https", "http"].contains(scheme) else {
-            errorText = DownloaderError.invalidServerURL.localizedDescription
-            return
-        }
-
         errorText = nil
         alertTitle = "下载失败"
         latestFile = nil
@@ -93,24 +80,22 @@ final class DownloadViewModel: ObservableObject {
         speedText = "--"
         etaText = "--"
         transferredText = "--"
-        statusText = "服务器正在解析格式"
+        statusText = "iPhone 正在本机解析"
         activePhase = .resolving
         startResolverProgress()
         DiagnosticLogger.shared.beginSession(
             urlText: urlText,
-            endpoint: endpoint,
             kind: kind,
             quality: quality
         )
-        DiagnosticLogger.shared.info("开始请求解析服务器")
+        DiagnosticLogger.shared.info("开始本机解析，不使用解析服务器")
 
         Task {
             do {
                 let media = try await resolver.resolve(
                     urlText: urlText,
                     quality: quality,
-                    kind: kind,
-                    endpoint: endpoint
+                    kind: kind
                 )
                 stopResolverProgress(completed: true)
                 DiagnosticLogger.shared.info("解析成功; videoID=\(media.videoID); title=\(media.title)")
@@ -133,7 +118,7 @@ final class DownloadViewModel: ObservableObject {
                     statusText = resolutionText(video) + " · 下载视频"
                     activePhase = .downloadingVideo
                     DiagnosticLogger.shared.info("开始下载视频; \(sourceDescription(video))")
-                    let videoFile = try await downloadWithFallback(
+                    let videoFile = try await downloadDirect(
                         source: video
                     ) { [weak self] value in
                         Task { @MainActor in
@@ -145,7 +130,7 @@ final class DownloadViewModel: ObservableObject {
                     statusText = "下载 AAC 音频"
                     activePhase = .downloadingAudio
                     DiagnosticLogger.shared.info("开始下载音频; \(sourceDescription(media.audio))")
-                    let audioFile = try await downloadWithFallback(
+                    let audioFile = try await downloadDirect(
                         source: media.audio
                     ) { [weak self] value in
                         Task { @MainActor in
@@ -194,7 +179,7 @@ final class DownloadViewModel: ObservableObject {
                     statusText = "下载 AAC 音频"
                     activePhase = .downloadingAudio
                     DiagnosticLogger.shared.info("开始下载音频; \(sourceDescription(media.audio))")
-                    let audioFile = try await downloadWithFallback(
+                    let audioFile = try await downloadDirect(
                         source: media.audio
                     ) { [weak self] value in
                         Task { @MainActor in
@@ -287,10 +272,6 @@ final class DownloadViewModel: ObservableObject {
         if completed { resolveProgress = 1 }
     }
 
-    func resetServerURL() {
-        serverURL = "https://youtube.789113.cn/ios-api/resolve"
-    }
-
     func refreshFiles() {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
@@ -337,38 +318,15 @@ final class DownloadViewModel: ObservableObject {
         updateActivity(force: false)
     }
 
-    private func downloadWithFallback(
+    private func downloadDirect(
         source: MediaSource,
         progress: @escaping @Sendable (TransferProgress) -> Void
     ) async throws -> URL {
-        do {
-            return try await DownloadTransfer().download(
-                source: source,
-                allowsCellular: allowsCellular,
-                progress: progress
-            )
-        } catch {
-            DiagnosticLogger.shared.error(error, stage: "主下载源")
-            guard let fallbackURL = source.fallbackURL else { throw error }
-            statusText = "Google 直连不可用，切换服务器中转"
-            DiagnosticLogger.shared.warning("主下载源失败，切换服务器中转; host=\(fallbackURL.host ?? "unknown")")
-            let fallbackSource = MediaSource(
-                url: fallbackURL,
-                fallbackURL: nil,
-                httpHeaders: source.httpHeaders,
-                contentLength: source.contentLength,
-                codec: source.codec,
-                width: source.width,
-                height: source.height,
-                fps: source.fps,
-                bitrate: source.bitrate
-            )
-            return try await DownloadTransfer().download(
-                source: fallbackSource,
-                allowsCellular: allowsCellular,
-                progress: progress
-            )
-        }
+        try await DownloadTransfer().download(
+            source: source,
+            allowsCellular: allowsCellular,
+            progress: progress
+        )
     }
 
     private func updateActivity(force: Bool) {
@@ -394,7 +352,7 @@ final class DownloadViewModel: ObservableObject {
         let resolution = source.width.flatMap { width in
             source.height.map { "\(width)x\($0)" }
         } ?? "audio"
-        return "host=\(source.url.host ?? "unknown"); codec=\(source.codec); resolution=\(resolution); bytes=\(size); fallback=\(source.fallbackURL != nil)"
+        return "host=\(source.url.host ?? "unknown"); codec=\(source.codec); resolution=\(resolution); bytes=\(size); direct=true"
     }
 
     private func fileBytes(_ url: URL) -> Int {
@@ -454,7 +412,6 @@ final class DownloadViewModel: ObservableObject {
     }()
 
     private enum Keys {
-        static let serverURL = "settings.serverURL"
         static let allowsCellular = "settings.allowsCellular"
         static let notificationsEnabled = "settings.notificationsEnabled"
         static let liveActivityEnabled = "settings.liveActivityEnabled"

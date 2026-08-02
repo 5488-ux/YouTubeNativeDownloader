@@ -15,12 +15,12 @@ final class DiagnosticLogger {
         logURL = directory.appendingPathComponent("downloader.log")
     }
 
-    func beginSession(urlText: String, endpoint: URL, kind: DownloadKind, quality: VideoQuality) {
+    func beginSession(urlText: String, kind: DownloadKind, quality: VideoQuality) {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
         write("INFO", "========== 新任务 ==========")
         write("INFO", "App=\(version) (\(build)); iOS=\(UIDevice.current.systemVersion); device=\(UIDevice.current.model)")
-        write("INFO", "type=\(kind.rawValue); quality=\(quality.rawValue); endpoint=\(endpoint.absoluteString)")
+        write("INFO", "type=\(kind.rawValue); quality=\(quality.rawValue); resolver=local-innertube")
         write("INFO", "input=\(Self.safeInput(urlText))")
     }
 
