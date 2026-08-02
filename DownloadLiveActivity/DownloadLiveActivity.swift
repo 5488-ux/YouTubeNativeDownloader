@@ -11,10 +11,12 @@ struct DownloadLiveActivity: Widget {
                         .foregroundStyle(.blue)
                     Text(context.attributes.title)
                         .font(.headline)
+                        .foregroundStyle(Color.black.opacity(0.88))
                         .lineLimit(1)
                     Spacer()
                     Text("\(Int(context.state.progress * 100))%")
                         .font(.system(.subheadline, design: .monospaced).bold())
+                        .foregroundStyle(Color.black.opacity(0.88))
                 }
                 ProgressView(value: context.state.progress)
                     .tint(.blue)
@@ -24,10 +26,11 @@ struct DownloadLiveActivity: Widget {
                     Text(context.state.etaText)
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .fontWeight(.semibold)
+                .foregroundStyle(Color.black.opacity(0.62))
             }
             .padding()
-            .activityBackgroundTint(.white.opacity(0.9))
+            .activityBackgroundTint(.white.opacity(0.96))
             .activitySystemActionForegroundColor(.blue)
         } dynamicIsland: { context in
             DynamicIsland {
