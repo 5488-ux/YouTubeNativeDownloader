@@ -10,6 +10,8 @@ enum DownloaderError: LocalizedError {
     case mergeFailed(String)
     case extractionFailed(String)
     case resolverUnavailable(String)
+    case photoPermissionDenied
+    case photoSaveFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -31,6 +33,10 @@ enum DownloaderError: LocalizedError {
             return "YouTube 解析失败：\(message)"
         case .resolverUnavailable(let message):
             return message
+        case .photoPermissionDenied:
+            return "MOV 已下载完成，但没有照片写入权限。请到 iPhone 设置中允许本 App 添加照片。"
+        case .photoSaveFailed(let message):
+            return "MOV 已下载完成，但自动保存到照片失败：\(message)"
         }
     }
 }

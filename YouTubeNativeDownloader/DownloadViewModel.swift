@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import Photos
 import UIKit
 
 @MainActor
@@ -13,6 +14,7 @@ final class DownloadViewModel: ObservableObject {
     @Published private(set) var speedText = "--"
     @Published private(set) var etaText = "--"
     @Published private(set) var transferredText = "--"
+    @Published private(set) var alertTitle = "下载失败"
     @Published private(set) var errorText: String?
     @Published private(set) var latestFile: URL?
     @Published private(set) var savedFiles: [URL] = []
@@ -58,6 +60,7 @@ final class DownloadViewModel: ObservableObject {
         }
 
         errorText = nil
+        alertTitle = "下载失败"
         latestFile = nil
         isBusy = true
         progress = 0
@@ -150,19 +153,43 @@ final class DownloadViewModel: ObservableObject {
                     output = try MediaFileBuilder.saveAudio(sourceURL: audioFile, title: media.title)
                 }
 
+                latestFile = output
+                refreshFiles()
+                progress = 0.995
+                speedText = "保存中"
+                etaText = "即将完成"
+
+                var notificationTitle = "下载完成"
+                var notificationBody = output.lastPathComponent
+                if kind == .video {
+                    statusText = "正在自动保存 MOV 到照片"
+                    updateActivity(force: true)
+                    do {
+                        try await saveVideoToPhotos(output)
+                        statusText = "完成，MOV 已自动保存到照片"
+                        notificationBody = "已保存到照片：\(output.lastPathComponent)"
+                    } catch {
+                        alertTitle = "自动保存失败"
+                        errorText = error.localizedDescription
+                        statusText = "MOV 已完成，但自动保存到照片失败"
+                        notificationTitle = "MOV 已下载"
+                        notificationBody = "照片保存失败，文件仍保留在 App 文件中"
+                    }
+                } else {
+                    statusText = "下载完成，音频已保存到 App 文件"
+                }
+
                 progress = 1
                 speedText = "已完成"
                 etaText = "0 秒"
-                statusText = "下载完成，已保存到 App 文件"
-                latestFile = output
-                refreshFiles()
                 DownloadActivityManager.shared.end(finalStatus: "下载完成")
                 NotificationManager.post(
-                    title: "下载完成",
-                    body: output.lastPathComponent,
+                    title: notificationTitle,
+                    body: notificationBody,
                     enabled: notificationsEnabled
                 )
             } catch {
+                alertTitle = "下载失败"
                 errorText = error.localizedDescription
                 statusText = "下载失败"
                 speedText = "--"
@@ -274,6 +301,37 @@ final class DownloadViewModel: ObservableObject {
         guard let width = source.width, let height = source.height else { return "H.264" }
         let fps = source.fps.map { " · \($0)fps" } ?? ""
         return "\(width)×\(height)\(fps) · H.264"
+    }
+
+    private func saveVideoToPhotos(_ fileURL: URL) async throws {
+        var authorization = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        if authorization == .notDetermined {
+            authorization = await withCheckedContinuation {
+                (continuation: CheckedContinuation<PHAuthorizationStatus, Never>) in
+                PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                    continuation.resume(returning: status)
+                }
+            }
+        }
+
+        guard authorization == .authorized || authorization == .limited else {
+            throw DownloaderError.photoPermissionDenied
+        }
+
+        try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: fileURL)
+            } completionHandler: { success, error in
+                if success {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: DownloaderError.photoSaveFailed(
+                        error?.localizedDescription ?? "照片图库没有接受该视频"
+                    ))
+                }
+            }
+        }
     }
 
     private static func durationText(_ seconds: TimeInterval) -> String {

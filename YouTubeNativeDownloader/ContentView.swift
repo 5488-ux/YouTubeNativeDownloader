@@ -36,7 +36,7 @@ struct ContentView: View {
             .sheet(isPresented: $showingSettings) {
                 SettingsView(model: model)
             }
-            .alert("下载失败", isPresented: Binding(
+            .alert(model.alertTitle, isPresented: Binding(
                 get: { model.errorText != nil },
                 set: { if !$0 { model.cancelMessage() } }
             )) {
@@ -166,7 +166,7 @@ struct ContentView: View {
                 Button {
                     shareItem = ShareItem(fileURL: file)
                 } label: {
-                    Label("保存到照片或文件", systemImage: "square.and.arrow.up")
+                    Label("再次分享或导出", systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -283,8 +283,8 @@ private struct SettingsView: View {
 
                 Section("更新日志") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("2.1").font(.headline)
-                        Text("• 修复下载视频长期卡在 0%\n• 使用稳定服务器中转地址\n• 下载后由 iPhone 合并并转换 MOV\n• 新增 MOV 转换真实进度条\n• 保留后台下载、通知和灵动岛")
+                        Text("2.2").font(.headline)
+                        Text("• MOV 转换完成后自动保存到照片\n• 首次使用只请求一次照片写入权限\n• 不再强制打开手动保存弹窗\n• App 文件中仍保留原文件备份")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -302,8 +302,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.1"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "7"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.2"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "8"
         return "\(version) (\(build))"
     }
 }
