@@ -3,6 +3,17 @@ import Foundation
 import Photos
 import UIKit
 
+enum DownloadTaskPhase: Equatable {
+    case idle
+    case resolving
+    case downloadingVideo
+    case downloadingAudio
+    case converting
+    case saving
+    case completed
+    case failed
+}
+
 @MainActor
 final class DownloadViewModel: ObservableObject {
     @Published var urlText = ""
@@ -10,6 +21,7 @@ final class DownloadViewModel: ObservableObject {
     @Published var quality: VideoQuality = .best
     @Published private(set) var isBusy = false
     @Published private(set) var progress = 0.0
+    @Published private(set) var resolveProgress = 0.0
     @Published private(set) var videoProgress = 0.0
     @Published private(set) var audioProgress = 0.0
     @Published private(set) var conversionProgress = 0.0
@@ -21,6 +33,7 @@ final class DownloadViewModel: ObservableObject {
     @Published private(set) var errorText: String?
     @Published private(set) var latestFile: URL?
     @Published private(set) var savedFiles: [URL] = []
+    @Published private(set) var activePhase: DownloadTaskPhase = .idle
 
     @Published var serverURL: String {
         didSet { UserDefaults.standard.set(serverURL, forKey: Keys.serverURL) }
@@ -40,6 +53,7 @@ final class DownloadViewModel: ObservableObject {
 
     private let resolver = VideoResolver()
     private var lastActivityUpdate = Date.distantPast
+    private var resolverProgressTask: Task<Void, Never>?
 
     init() {
         let defaults = UserDefaults.standard
@@ -67,6 +81,7 @@ final class DownloadViewModel: ObservableObject {
         latestFile = nil
         isBusy = true
         progress = 0
+        resolveProgress = 0.04
         videoProgress = 0
         audioProgress = 0
         conversionProgress = 0
@@ -74,6 +89,8 @@ final class DownloadViewModel: ObservableObject {
         etaText = "--"
         transferredText = "--"
         statusText = "服务器正在解析格式"
+        activePhase = .resolving
+        startResolverProgress()
         DiagnosticLogger.shared.beginSession(
             urlText: urlText,
             endpoint: endpoint,
@@ -90,6 +107,7 @@ final class DownloadViewModel: ObservableObject {
                     kind: kind,
                     endpoint: endpoint
                 )
+                stopResolverProgress(completed: true)
                 DiagnosticLogger.shared.info("解析成功; videoID=\(media.videoID); title=\(media.title)")
                 DownloadActivityManager.shared.start(
                     title: media.title,
@@ -108,6 +126,7 @@ final class DownloadViewModel: ObservableObject {
                     let audioWeight = 0.90 - videoWeight
 
                     statusText = resolutionText(video) + " · 下载视频"
+                    activePhase = .downloadingVideo
                     DiagnosticLogger.shared.info("开始下载视频; \(sourceDescription(video))")
                     let videoFile = try await downloadWithFallback(
                         source: video
@@ -119,6 +138,7 @@ final class DownloadViewModel: ObservableObject {
                     videoProgress = 1
 
                     statusText = "下载 AAC 音频"
+                    activePhase = .downloadingAudio
                     DiagnosticLogger.shared.info("开始下载音频; \(sourceDescription(media.audio))")
                     let audioFile = try await downloadWithFallback(
                         source: media.audio
@@ -130,6 +150,7 @@ final class DownloadViewModel: ObservableObject {
                     audioProgress = 1
 
                     statusText = "iPhone 正在合并并转换 MOV"
+                    activePhase = .converting
                     DiagnosticLogger.shared.info("音视频下载完成，开始本机 MOV 转换")
                     progress = 0.90
                     conversionProgress = 0
@@ -166,6 +187,7 @@ final class DownloadViewModel: ObservableObject {
 
                 case .audio:
                     statusText = "下载 AAC 音频"
+                    activePhase = .downloadingAudio
                     DiagnosticLogger.shared.info("开始下载音频; \(sourceDescription(media.audio))")
                     let audioFile = try await downloadWithFallback(
                         source: media.audio
@@ -182,6 +204,7 @@ final class DownloadViewModel: ObservableObject {
                 latestFile = output
                 refreshFiles()
                 progress = 0.995
+                activePhase = .saving
                 speedText = "保存中"
                 etaText = "即将完成"
 
@@ -208,6 +231,7 @@ final class DownloadViewModel: ObservableObject {
                 }
 
                 progress = 1
+                activePhase = .completed
                 speedText = "已完成"
                 etaText = "0 秒"
                 DownloadActivityManager.shared.end(finalStatus: "下载完成")
@@ -217,6 +241,8 @@ final class DownloadViewModel: ObservableObject {
                     enabled: notificationsEnabled
                 )
             } catch {
+                stopResolverProgress(completed: false)
+                activePhase = .failed
                 DiagnosticLogger.shared.error(error, stage: statusText)
                 alertTitle = "下载失败"
                 errorText = error.localizedDescription
@@ -236,6 +262,24 @@ final class DownloadViewModel: ObservableObject {
 
     func cancelMessage() {
         errorText = nil
+    }
+
+    private func startResolverProgress() {
+        resolverProgressTask?.cancel()
+        resolverProgressTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled, let self else { return }
+                let remaining = max(0, 0.92 - self.resolveProgress)
+                self.resolveProgress = min(0.92, self.resolveProgress + max(0.012, remaining * 0.14))
+            }
+        }
+    }
+
+    private func stopResolverProgress(completed: Bool) {
+        resolverProgressTask?.cancel()
+        resolverProgressTask = nil
+        if completed { resolveProgress = 1 }
     }
 
     func resetServerURL() {

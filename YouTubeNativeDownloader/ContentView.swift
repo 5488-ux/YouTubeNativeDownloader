@@ -238,47 +238,52 @@ struct ContentView: View {
                 .background(.white.opacity(0.62), in: Capsule())
             }
 
-            if model.kind == .video {
+            if model.isBusy, model.activePhase == .resolving {
+                phaseProgress(
+                    title: "服务器解析",
+                    value: model.resolveProgress,
+                    icon: "server.rack",
+                    color: .blue
+                )
+            } else if model.isBusy, model.activePhase == .downloadingVideo {
                 phaseProgress(
                     title: "视频 MP4",
                     value: model.videoProgress,
                     icon: "film.fill",
                     color: .blue
                 )
+            } else if model.isBusy, model.activePhase == .downloadingAudio {
                 phaseProgress(
                     title: "AAC 音频",
                     value: model.audioProgress,
                     icon: "waveform",
                     color: .purple
                 )
-                if model.conversionProgress > 0 {
-                    phaseProgress(
-                        title: "MOV 转换",
-                        value: model.conversionProgress,
-                        icon: "iphone.gen3",
-                        color: .green
-                    )
-                }
-            } else {
+            } else if model.isBusy, model.activePhase == .converting {
                 phaseProgress(
-                    title: "AAC 音频",
-                    value: model.audioProgress,
-                    icon: "waveform",
-                    color: .purple
+                    title: "MOV 转换",
+                    value: model.conversionProgress,
+                    icon: "iphone.gen3",
+                    color: .green
                 )
             }
 
-            HStack(spacing: 10) {
-                metric(title: "速度", value: model.speedText, icon: "speedometer")
-                metric(title: "时间", value: model.etaText, icon: "clock")
-            }
-            if model.transferredText != "--" {
-                HStack(spacing: 6) {
-                    Image(systemName: "externaldrive.fill")
-                    Text(model.transferredText)
+            if model.isBusy,
+               model.activePhase == .downloadingVideo ||
+               model.activePhase == .downloadingAudio ||
+               model.activePhase == .converting {
+                HStack(spacing: 10) {
+                    metric(title: "速度", value: model.speedText, icon: "speedometer")
+                    metric(title: "时间", value: model.etaText, icon: "clock")
                 }
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+                if model.transferredText != "--", model.activePhase != .converting {
+                    HStack(spacing: 6) {
+                        Image(systemName: "externaldrive.fill")
+                        Text(model.transferredText)
+                    }
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                }
             }
 
             if let file = model.latestFile {
@@ -473,8 +478,8 @@ private struct SettingsView: View {
 
                 Section("更新日志") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("2.5").font(.headline)
-                        Text("• 全新明亮液态玻璃界面\n• 强化下载入口和任务状态层级\n• 进度卡片与文件列表重新设计\n• 文件操作收进简洁菜单")
+                        Text("2.6").font(.headline)
+                        Text("• 进度条只在任务执行时出现\n• 新增服务器解析进度\n• 视频、AAC、MOV 按阶段单独切换\n• 不再同时堆叠多条进度")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -494,8 +499,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.5"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "11"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.6"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "12"
         return "\(version) (\(build))"
     }
 }
