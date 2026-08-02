@@ -462,6 +462,11 @@ private struct SettingsView: View {
                 }
 
                 Section("关于") {
+                    NavigationLink {
+                        FeatureGuideView()
+                    } label: {
+                        Label("功能介绍", systemImage: "list.bullet.rectangle")
+                    }
                     Link(destination: URL(string: "https://github.com/5488-ux/YouTubeNativeDownloader")!) {
                         Label("打开 GitHub", systemImage: "link")
                     }
@@ -478,8 +483,8 @@ private struct SettingsView: View {
 
                 Section("更新日志") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("2.6").font(.headline)
-                        Text("• 进度条只在任务执行时出现\n• 新增服务器解析进度\n• 视频、AAC、MOV 按阶段单独切换\n• 不再同时堆叠多条进度")
+                        Text("2.7").font(.headline)
+                        Text("• 设置中新增完整功能介绍\n• 按下载、后台、本机处理和诊断分类说明")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -499,9 +504,122 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.6"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "12"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.7"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "13"
         return "\(version) (\(build))"
+    }
+}
+
+private struct FeatureGuideView: View {
+    var body: some View {
+        List {
+            Section("视频与音频") {
+                feature(
+                    "多种 YouTube 链接",
+                    "支持普通视频、Shorts、youtu.be、Embed 和 Live 链接。",
+                    "link",
+                    .blue
+                )
+                feature(
+                    "最高画质下载",
+                    "支持最佳画质、1080P、720P 和 480P，优先选择 iPhone 兼容的 H.264。",
+                    "sparkles.tv",
+                    .indigo
+                )
+                feature(
+                    "视频或纯音频",
+                    "视频输出 MOV，纯音频输出 M4A；视频和 AAC 音频分别下载。",
+                    "film.fill",
+                    .purple
+                )
+            }
+
+            Section("下载体验") {
+                feature(
+                    "分阶段实时进度",
+                    "服务器解析、视频、AAC 和 MOV 转换按当前阶段显示进度、速度与剩余时间。",
+                    "chart.bar.fill",
+                    .blue
+                )
+                feature(
+                    "后台与锁屏下载",
+                    "使用系统后台下载，切换 App 或锁屏后仍可继续传输。",
+                    "arrow.down.app.fill",
+                    .cyan
+                )
+                feature(
+                    "灵动岛与通知",
+                    "支持 Live Activity、锁屏任务进度以及下载完成或失败通知。",
+                    "iphone.radiowaves.left.and.right",
+                    .orange
+                )
+            }
+
+            Section("iPhone 本机处理") {
+                feature(
+                    "本机合并 MOV",
+                    "视频和 AAC 下载完成后，由 iPhone 使用 AVFoundation 合并转换，不上传成品。",
+                    "iphone.gen3",
+                    .green
+                )
+                feature(
+                    "自动保存照片",
+                    "MOV 转换完成后自动写入照片图库，同时在 App 文件中保留一份备份。",
+                    "photo.on.rectangle.angled",
+                    .green
+                )
+                feature(
+                    "本机文件管理",
+                    "可以查看文件大小、再次分享或导出，也可以删除不需要的文件。",
+                    "folder.fill",
+                    .orange
+                )
+            }
+
+            Section("设置与诊断") {
+                feature(
+                    "网络与后台设置",
+                    "可控制蜂窝网络、完成通知、灵动岛和锁屏进度。",
+                    "gearshape.2.fill",
+                    .gray
+                )
+                feature(
+                    "自定义解析接口",
+                    "支持修改或恢复默认解析服务器地址。",
+                    "server.rack",
+                    .blue
+                )
+                feature(
+                    "详细错误日志",
+                    "记录解析、HTTP、下载、转换和照片保存错误，支持复制、刷新与清空。",
+                    "doc.text.magnifyingglass",
+                    .red
+                )
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(Color(red: 0.93, green: 0.96, blue: 1.0))
+        .navigationTitle("功能介绍")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func feature(_ title: String, _ detail: String, _ icon: String, _ color: Color) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(color)
+                .frame(width: 38, height: 38)
+                .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 5)
     }
 }
 
