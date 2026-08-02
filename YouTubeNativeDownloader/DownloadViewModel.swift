@@ -10,6 +10,9 @@ final class DownloadViewModel: ObservableObject {
     @Published var quality: VideoQuality = .best
     @Published private(set) var isBusy = false
     @Published private(set) var progress = 0.0
+    @Published private(set) var videoProgress = 0.0
+    @Published private(set) var audioProgress = 0.0
+    @Published private(set) var conversionProgress = 0.0
     @Published private(set) var statusText = "粘贴链接后开始"
     @Published private(set) var speedText = "--"
     @Published private(set) var etaText = "--"
@@ -64,6 +67,9 @@ final class DownloadViewModel: ObservableObject {
         latestFile = nil
         isBusy = true
         progress = 0
+        videoProgress = 0
+        audioProgress = 0
+        conversionProgress = 0
         speedText = "--"
         etaText = "--"
         transferredText = "--"
@@ -110,6 +116,7 @@ final class DownloadViewModel: ObservableObject {
                             self?.applyProgress(value, offset: 0, weight: videoWeight, phase: "下载视频")
                         }
                     }
+                    videoProgress = 1
 
                     statusText = "下载 AAC 音频"
                     DiagnosticLogger.shared.info("开始下载音频; \(sourceDescription(media.audio))")
@@ -120,10 +127,12 @@ final class DownloadViewModel: ObservableObject {
                             self?.applyProgress(value, offset: videoWeight, weight: audioWeight, phase: "下载音频")
                         }
                     }
+                    audioProgress = 1
 
                     statusText = "iPhone 正在合并并转换 MOV"
                     DiagnosticLogger.shared.info("音视频下载完成，开始本机 MOV 转换")
                     progress = 0.90
+                    conversionProgress = 0
                     speedText = "本机转换"
                     etaText = "转换 0%"
                     updateActivity(force: true)
@@ -143,6 +152,7 @@ final class DownloadViewModel: ObservableObject {
                             guard let self else { return }
                             let percent = Int(conversionProgress * 100)
                             self.progress = 0.90 + conversionProgress * 0.09
+                            self.conversionProgress = conversionProgress
                             self.statusText = "iPhone 正在转换 MOV · \(percent)%"
                             self.speedText = "本机转换"
                             self.etaText = "转换 \(percent)%"
@@ -151,6 +161,7 @@ final class DownloadViewModel: ObservableObject {
                     }
                     try? FileManager.default.removeItem(at: videoFile)
                     try? FileManager.default.removeItem(at: audioFile)
+                    conversionProgress = 1
                     DiagnosticLogger.shared.info("MOV 转换完成; file=\(output.lastPathComponent); bytes=\(fileBytes(output))")
 
                 case .audio:
@@ -163,6 +174,7 @@ final class DownloadViewModel: ObservableObject {
                             self?.applyProgress(value, offset: 0, weight: 0.98, phase: "下载音频")
                         }
                     }
+                    audioProgress = 1
                     output = try MediaFileBuilder.saveAudio(sourceURL: audioFile, title: media.title)
                     DiagnosticLogger.shared.info("音频保存完成; file=\(output.lastPathComponent); bytes=\(fileBytes(output))")
                 }
@@ -258,6 +270,11 @@ final class DownloadViewModel: ObservableObject {
 
     private func applyProgress(_ value: TransferProgress, offset: Double, weight: Double, phase: String) {
         progress = min(0.96, offset + value.fraction * weight)
+        if phase == "下载视频" {
+            videoProgress = value.fraction
+        } else if phase == "下载音频" {
+            audioProgress = value.fraction
+        }
         speedText = value.bytesPerSecond > 1
             ? Self.speedFormatter.string(fromByteCount: Int64(value.bytesPerSecond)) + "/s"
             : "测速中"

@@ -145,15 +145,38 @@ struct ContentView: View {
 
     private var progressCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("任务状态").font(.headline)
-                Spacer()
-                Text("\(Int(model.progress * 100))%")
-                    .font(.system(.subheadline, design: .monospaced).weight(.semibold))
-                    .foregroundStyle(.blue)
+            Text("任务状态").font(.headline)
+
+            if model.kind == .video {
+                phaseProgress(
+                    title: "视频 MP4",
+                    value: model.videoProgress,
+                    icon: "film.fill",
+                    color: .blue
+                )
+                phaseProgress(
+                    title: "AAC 音频",
+                    value: model.audioProgress,
+                    icon: "waveform",
+                    color: .purple
+                )
+                if model.conversionProgress > 0 {
+                    phaseProgress(
+                        title: "MOV 转换",
+                        value: model.conversionProgress,
+                        icon: "iphone.gen3",
+                        color: .green
+                    )
+                }
+            } else {
+                phaseProgress(
+                    title: "AAC 音频",
+                    value: model.audioProgress,
+                    icon: "waveform",
+                    color: .purple
+                )
             }
-            ProgressView(value: model.progress)
-                .tint(.blue)
+
             Text(model.statusText)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -178,6 +201,28 @@ struct ContentView: View {
             }
         }
         .glassCard()
+    }
+
+    private func phaseProgress(
+        title: String,
+        value: Double,
+        icon: String,
+        color: Color
+    ) -> some View {
+        VStack(spacing: 7) {
+            HStack {
+                Label(title, systemImage: icon)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(Int(min(1, max(0, value)) * 100))%")
+                    .font(.caption.monospacedDigit().weight(.bold))
+                    .foregroundStyle(color)
+            }
+            ProgressView(value: value)
+                .tint(color)
+        }
+        .padding(12)
+        .background(.white.opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private func metric(title: String, value: String, icon: String) -> some View {
@@ -295,8 +340,8 @@ private struct SettingsView: View {
 
                 Section("更新日志") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("2.3").font(.headline)
-                        Text("• 增加详细错误日志，可复制和清空\n• 记录解析、下载、转码和照片保存阶段\n• 记录 HTTP 状态、错误域、错误码和底层错误\n• 自动隐藏媒体签名链接")
+                        Text("2.4").font(.headline)
+                        Text("• 视频与 AAC 音频改为两条独立进度条\n• MOV 本机转换使用单独进度条\n• 不再把多个阶段挤在同一条进度里")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -314,8 +359,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.3"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "9"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.4"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "10"
         return "\(version) (\(build))"
     }
 }
