@@ -68,6 +68,11 @@ final class DownloadViewModel: ObservableObject {
 
     func start() {
         guard !isBusy else { return }
+        if kind == .video && !FFmpegComponentManager.shared.isInstalled {
+            alertTitle = "需要合并组件"
+            errorText = DownloaderError.componentMissing.localizedDescription
+            return
+        }
         let trimmedServer = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let endpoint = URL(string: trimmedServer),
               let scheme = endpoint.scheme?.lowercased(),
@@ -149,22 +154,22 @@ final class DownloadViewModel: ObservableObject {
                     }
                     audioProgress = 1
 
-                    statusText = "iPhone 正在合并并转换 MOV"
+                    statusText = "FFmpeg 正在合并 MP4"
                     activePhase = .converting
-                    DiagnosticLogger.shared.info("音视频下载完成，开始本机 MOV 转换")
+                    DiagnosticLogger.shared.info("音视频下载完成，开始本机 FFmpeg WASM 合并")
                     progress = 0.90
                     conversionProgress = 0
-                    speedText = "本机转换"
-                    etaText = "转换 0%"
+                    speedText = "本机合并"
+                    etaText = "合并 0%"
                     updateActivity(force: true)
 
-                    let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "MOV conversion")
+                    let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "FFmpeg MP4 merge")
                     defer {
                         if backgroundTask != .invalid {
                             UIApplication.shared.endBackgroundTask(backgroundTask)
                         }
                     }
-                    output = try await MediaFileBuilder.mergeToMOV(
+                    output = try await FFmpegWasmRunner.mergeToMP4(
                         videoURL: videoFile,
                         audioURL: audioFile,
                         title: media.title
@@ -174,16 +179,16 @@ final class DownloadViewModel: ObservableObject {
                             let percent = Int(conversionProgress * 100)
                             self.progress = 0.90 + conversionProgress * 0.09
                             self.conversionProgress = conversionProgress
-                            self.statusText = "iPhone 正在转换 MOV · \(percent)%"
-                            self.speedText = "本机转换"
-                            self.etaText = "转换 \(percent)%"
+                            self.statusText = "FFmpeg 正在合并 MP4 · \(percent)%"
+                            self.speedText = "本机合并"
+                            self.etaText = "合并 \(percent)%"
                             self.updateActivity(force: false)
                         }
                     }
                     try? FileManager.default.removeItem(at: videoFile)
                     try? FileManager.default.removeItem(at: audioFile)
                     conversionProgress = 1
-                    DiagnosticLogger.shared.info("MOV 转换完成; file=\(output.lastPathComponent); bytes=\(fileBytes(output))")
+                    DiagnosticLogger.shared.info("FFmpeg MP4 合并完成; file=\(output.lastPathComponent); bytes=\(fileBytes(output))")
 
                 case .audio:
                     statusText = "下载 AAC 音频"
@@ -211,19 +216,19 @@ final class DownloadViewModel: ObservableObject {
                 var notificationTitle = "下载完成"
                 var notificationBody = output.lastPathComponent
                 if kind == .video {
-                    statusText = "正在自动保存 MOV 到照片"
+                    statusText = "正在自动保存 MP4 到照片"
                     updateActivity(force: true)
                     do {
                         try await saveVideoToPhotos(output)
                         DiagnosticLogger.shared.info("照片图库保存成功")
-                        statusText = "完成，MOV 已自动保存到照片"
+                        statusText = "完成，MP4 已自动保存到照片"
                         notificationBody = "已保存到照片：\(output.lastPathComponent)"
                     } catch {
                         DiagnosticLogger.shared.error(error, stage: "保存到照片")
                         alertTitle = "自动保存失败"
                         errorText = error.localizedDescription
-                        statusText = "MOV 已完成，但自动保存到照片失败"
-                        notificationTitle = "MOV 已下载"
+                        statusText = "MP4 已完成，但自动保存到照片失败"
+                        notificationTitle = "MP4 已下载"
                         notificationBody = "照片保存失败，文件仍保留在 App 文件中"
                     }
                 } else {
@@ -350,6 +355,7 @@ final class DownloadViewModel: ObservableObject {
             let fallbackSource = MediaSource(
                 url: fallbackURL,
                 fallbackURL: nil,
+                httpHeaders: source.httpHeaders,
                 contentLength: source.contentLength,
                 codec: source.codec,
                 width: source.width,

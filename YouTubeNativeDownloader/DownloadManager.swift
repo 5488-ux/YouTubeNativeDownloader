@@ -68,10 +68,15 @@ final class DownloadTransfer: NSObject, URLSessionDownloadDelegate, @unchecked S
 
             var request = URLRequest(url: source.url)
             request.timeoutInterval = 60
-            request.setValue(
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
-                forHTTPHeaderField: "User-Agent"
-            )
+            for (name, value) in source.httpHeaders {
+                request.setValue(value, forHTTPHeaderField: name)
+            }
+            if request.value(forHTTPHeaderField: "User-Agent") == nil {
+                request.setValue(
+                    "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+                    forHTTPHeaderField: "User-Agent"
+                )
+            }
             session.downloadTask(with: request).resume()
         }
     }

@@ -4,7 +4,7 @@ import { request as httpRequest } from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
-import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 const execFileAsync = promisify(execFile);
@@ -14,22 +14,14 @@ const YTDLP = '/opt/ytdlp-php/bin/yt-dlp';
 const DENO = '/usr/local/bin/deno';
 const SOURCE_COOKIE_FILE = '/www/wwwroot/youtube.789113.cn/storage/cookies.txt';
 const COOKIE_FILE = '/var/lib/youtube-ios-resolver/cookies.txt';
-const TOKEN_FILE = '/var/lib/youtube-ios-resolver/tokens.json';
 const TOKEN_TTL = 6 * 60 * 60 * 1000;
 const MAX_BODY = 32 * 1024;
-const tokens = new Map();
 const rateLimits = new Map();
+const tokens = new Map();
 
-await mkdir(dirname(TOKEN_FILE), { recursive: true });
+await mkdir(dirname(COOKIE_FILE), { recursive: true });
 try {
   await copyFile(SOURCE_COOKIE_FILE, COOKIE_FILE);
-} catch {}
-try {
-  const saved = JSON.parse(await readFile(TOKEN_FILE, 'utf8'));
-  const now = Date.now();
-  for (const [token, value] of Object.entries(saved)) {
-    if (value.expiresAt > now) tokens.set(token, value);
-  }
 } catch {}
 
 function json(res, status, value) {
@@ -99,16 +91,6 @@ function safeMediaURL(value) {
   }
 }
 
-let persistTimer;
-function schedulePersist() {
-  clearTimeout(persistTimer);
-  persistTimer = setTimeout(async () => {
-    const temporary = `${TOKEN_FILE}.tmp`;
-    await writeFile(temporary, JSON.stringify(Object.fromEntries(tokens)), { mode: 0o600 });
-    await rename(temporary, TOKEN_FILE);
-  }, 100);
-}
-
 function publicBase(req) {
   const host = String(req.headers['x-forwarded-host'] || req.headers.host || 'youtube.789113.cn')
     .replace(/[^A-Za-z0-9.:-]/g, '');
@@ -118,18 +100,23 @@ function publicBase(req) {
 function registerSource(req, format) {
   const sourceURL = safeMediaURL(format?.url);
   if (!sourceURL) throw new Error('解析结果包含无效媒体地址');
+  const allowedHeaders = ['User-Agent', 'Referer', 'Origin', 'Accept', 'Accept-Language'];
+  const httpHeaders = Object.fromEntries(
+    allowedHeaders
+      .filter(name => typeof format?.http_headers?.[name] === 'string')
+      .map(name => [name, format.http_headers[name]])
+  );
   const token = randomBytes(24).toString('hex');
   tokens.set(token, {
     url: sourceURL,
-    expiresAt: Date.now() + TOKEN_TTL,
-    userAgent: format?.http_headers?.['User-Agent'] || 'Mozilla/5.0'
+    headers: httpHeaders,
+    expiresAt: Date.now() + TOKEN_TTL
   });
-  schedulePersist();
-  const relayURL = `${publicBase(req)}/media/${token}`;
   return {
-    url: relayURL,
-    fallback_url: null,
+    url: sourceURL,
+    fallback_url: `${publicBase(req)}/media/${token}`,
     direct_url: sourceURL,
+    http_headers: httpHeaders,
     content_length: asNumber(format.filesize || format.filesize_approx),
     codec: format.vcodec && format.vcodec !== 'none' ? format.vcodec : format.acodec,
     width: asNumber(format.width),
@@ -223,10 +210,10 @@ function proxyMedia(req, res, token, redirectCount = 0) {
   const source = new URL(entry.url);
   const transport = source.protocol === 'https:' ? httpsRequest : httpRequest;
   const headers = {
-    'User-Agent': entry.userAgent,
-    'Accept': '*/*',
+    ...entry.headers,
+    Accept: entry.headers.Accept || '*/*',
     'Accept-Encoding': 'identity',
-    'Connection': 'keep-alive'
+    Connection: 'keep-alive'
   };
   if (req.headers.range) headers.Range = req.headers.range;
 
@@ -241,7 +228,7 @@ function proxyMedia(req, res, token, redirectCount = 0) {
     for (const name of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'etag', 'last-modified']) {
       if (upstreamResponse.headers[name] !== undefined) responseHeaders[name] = upstreamResponse.headers[name];
     }
-    responseHeaders['cache-control'] = 'private, max-age=300';
+    responseHeaders['cache-control'] = 'private, no-store';
     res.writeHead(upstreamResponse.statusCode || 502, responseHeaders);
     if (req.method === 'HEAD') {
       upstreamResponse.resume();
@@ -287,7 +274,6 @@ setInterval(() => {
     if (recent.length) rateLimits.set(key, recent);
     else rateLimits.delete(key);
   }
-  schedulePersist();
 }, 30 * 60 * 1000).unref();
 
 server.listen(PORT, HOST, () => {

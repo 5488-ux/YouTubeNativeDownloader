@@ -3,6 +3,7 @@ import Foundation
 struct MediaSource: Sendable {
     let url: URL
     let fallbackURL: URL?
+    let httpHeaders: [String: String]
     let contentLength: Int64?
     let codec: String
     let width: Int?
@@ -19,7 +20,7 @@ struct ResolvedMedia: Sendable {
 }
 
 enum DownloadKind: String, CaseIterable, Identifiable, Codable {
-    case video = "视频 MOV"
+    case video = "视频 MP4"
     case audio = "音频 M4A"
 
     var id: String { rawValue }
@@ -67,6 +68,7 @@ private struct ResolveResponse: Decodable {
 private struct SourceResponse: Decodable {
     let url: String
     let fallbackURL: String?
+    let httpHeaders: [String: String]?
     let contentLength: Int64?
     let codec: String?
     let width: Int?
@@ -77,6 +79,7 @@ private struct SourceResponse: Decodable {
     enum CodingKeys: String, CodingKey {
         case url, codec, width, height, fps, bitrate
         case fallbackURL = "fallback_url"
+        case httpHeaders = "http_headers"
         case contentLength = "content_length"
     }
 }
@@ -165,6 +168,7 @@ final class VideoResolver {
         return MediaSource(
             url: url,
             fallbackURL: source.fallbackURL.flatMap(URL.init(string:)),
+            httpHeaders: source.httpHeaders ?? [:],
             contentLength: source.contentLength,
             codec: source.codec ?? "unknown",
             width: source.width,

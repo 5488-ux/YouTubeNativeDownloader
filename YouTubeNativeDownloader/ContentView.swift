@@ -3,8 +3,10 @@ import UIKit
 
 struct ContentView: View {
     @StateObject private var model = DownloadViewModel()
+    @StateObject private var ffmpeg = FFmpegComponentManager.shared
     @State private var shareItem: ShareItem?
     @State private var showingSettings = false
+    @State private var showingFFmpegPrompt = false
 
     var body: some View {
         NavigationStack {
@@ -15,6 +17,9 @@ struct ContentView: View {
                     VStack(spacing: 16) {
                         header
                         composer
+                        if ffmpeg.state == .downloading || ffmpeg.state == .verifying {
+                            ffmpegDownloadCard
+                        }
                         progressCard
                         filesCard
                     }
@@ -29,12 +34,33 @@ struct ContentView: View {
                 ShareSheet(fileURL: item.fileURL)
             }
             .sheet(isPresented: $showingSettings) {
-                SettingsView(model: model)
+                SettingsView(model: model, ffmpeg: ffmpeg)
+            }
+            .onAppear {
+                if !ffmpeg.isInstalled {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                        showingFFmpegPrompt = true
+                    }
+                }
+            }
+            .alert("下载完整 FFmpeg 组件", isPresented: $showingFFmpegPrompt) {
+                Button("下载完整包") {
+                    ffmpeg.install(allowsCellular: model.allowsCellular)
+                }
+                Button("暂不下载", role: .cancel) {}
+            } message: {
+                Text("高清视频需要在 iPhone 本机合并。完整组件约 19.7 MB，只下载一次，可在设置中更新或删除。")
             }
             .alert(model.alertTitle, isPresented: Binding(
                 get: { model.errorText != nil },
                 set: { if !$0 { model.cancelMessage() } }
             )) {
+                if model.alertTitle == "需要合并组件" {
+                    Button("下载完整包") {
+                        model.cancelMessage()
+                        ffmpeg.install(allowsCellular: model.allowsCellular)
+                    }
+                }
                 Button("知道了", role: .cancel) { model.cancelMessage() }
                 Button("复制详细日志") {
                     UIPasteboard.general.string = DiagnosticLogger.shared.text()
@@ -44,6 +70,36 @@ struct ContentView: View {
                 Text(model.errorText ?? "未知错误")
             }
         }
+    }
+
+    private var ffmpegDownloadCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label(
+                    ffmpeg.state == .verifying ? "正在校验组件" : "正在下载完整 FFmpeg",
+                    systemImage: "shippingbox.fill"
+                )
+                .font(.headline)
+                Spacer()
+                Text("\(Int(ffmpeg.progress * 100))%")
+                    .font(.subheadline.bold().monospacedDigit())
+            }
+            ProgressView(value: ffmpeg.progress)
+                .tint(.indigo)
+            HStack {
+                Text(ffmpeg.transferredText)
+                Spacer()
+                Text(ffmpeg.speedText)
+                Text(ffmpeg.etaText)
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+            if ffmpeg.state == .downloading {
+                Button("取消组件下载", role: .destructive) { ffmpeg.cancelInstall() }
+                    .font(.caption.weight(.semibold))
+            }
+        }
+        .glassCard()
     }
 
     private var appBackground: some View {
@@ -261,7 +317,7 @@ struct ContentView: View {
                 )
             } else if model.isBusy, model.activePhase == .converting {
                 phaseProgress(
-                    title: "MOV 转换",
+                    title: "FFmpeg 合并 MP4",
                     value: model.conversionProgress,
                     icon: "iphone.gen3",
                     color: .green
@@ -438,6 +494,7 @@ struct ContentView: View {
 
 private struct SettingsView: View {
     @ObservedObject var model: DownloadViewModel
+    @ObservedObject var ffmpeg: FFmpegComponentManager
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -450,6 +507,52 @@ private struct SettingsView: View {
                 }
 
                 Section {
+                    HStack(spacing: 12) {
+                        Image(systemName: ffmpeg.isInstalled ? "checkmark.seal.fill" : "shippingbox")
+                            .foregroundStyle(ffmpeg.isInstalled ? Color.green : Color.indigo)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(ffmpeg.isInstalled ? "完整 FFmpeg 已安装" : "完整 FFmpeg 未安装")
+                                .font(.subheadline.weight(.semibold))
+                            Text(ffmpeg.isInstalled ? "\(FFmpegComponentManager.componentVersion) · \(ffmpeg.installedSizeText)" : "高清视频合并需要下载约 19.7 MB")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if ffmpeg.state == .downloading || ffmpeg.state == .verifying {
+                        ProgressView(value: ffmpeg.progress)
+                            .tint(.indigo)
+                        LabeledContent(ffmpeg.speedText, value: ffmpeg.etaText)
+                            .font(.caption)
+                        Text(ffmpeg.transferredText)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Button("取消下载", role: .destructive) { ffmpeg.cancelInstall() }
+                    } else if ffmpeg.isInstalled {
+                        Button("重新下载完整组件") {
+                            ffmpeg.remove()
+                            ffmpeg.install(allowsCellular: model.allowsCellular)
+                        }
+                        Button("删除组件", role: .destructive) { ffmpeg.remove() }
+                    } else {
+                        Button("下载完整 FFmpeg 组件") {
+                            ffmpeg.install(allowsCellular: model.allowsCellular)
+                        }
+                    }
+
+                    if case .failed(let message) = ffmpeg.state {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .textSelection(.enabled)
+                    }
+                } header: {
+                    Text("本机合并组件")
+                } footer: {
+                    Text("组件保存在 App 沙盒中。服务器不运行 FFmpeg；音视频全部下载完成后，由 iPhone 使用 FFmpeg 无损封装为 MP4。")
+                }
+
+                Section {
                     TextField("解析接口", text: $model.serverURL, axis: .vertical)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -458,7 +561,7 @@ private struct SettingsView: View {
                 } header: {
                     Text("解析服务器")
                 } footer: {
-                    Text("服务器负责 yt-dlp 解析和媒体中转；文件最终保存在本机。")
+                    Text("服务器运行 yt-dlp 解析。iPhone 优先直连媒体，地址受限时才使用临时中转；合并和保存均在本机完成。")
                 }
 
                 Section("关于") {
@@ -483,8 +586,8 @@ private struct SettingsView: View {
 
                 Section("更新日志") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("2.9").font(.headline)
-                        Text("• 修复锁屏实时活动白底文字过淡\n• 标题、百分比、速度和时间改为高对比度显示")
+                        Text("3.0").font(.headline)
+                        Text("• 首次启动可下载完整 FFmpeg WASM 组件\n• 视频和 AAC 完整下载后由 FFmpeg 无损合并 MP4\n• 增加组件进度、速度、校验、重装和删除")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -504,8 +607,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.9"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "15"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "3.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "16"
         return "\(version) (\(build))"
     }
 }
@@ -528,7 +631,7 @@ private struct FeatureGuideView: View {
                 )
                 feature(
                     "视频或纯音频",
-                    "视频输出 MOV，纯音频输出 M4A；视频和 AAC 音频分别下载。",
+                    "视频输出 MP4，纯音频输出 M4A；视频和 AAC 音频分别完整下载。",
                     "film.fill",
                     .purple
                 )
@@ -537,7 +640,7 @@ private struct FeatureGuideView: View {
             Section("下载体验") {
                 feature(
                     "分阶段实时进度",
-                    "服务器解析、视频、AAC 和 MOV 转换按当前阶段显示进度、速度与剩余时间。",
+                    "服务器解析、视频、AAC 和 FFmpeg 合并按当前阶段显示进度、速度与剩余时间。",
                     "chart.bar.fill",
                     .blue
                 )
@@ -557,14 +660,14 @@ private struct FeatureGuideView: View {
 
             Section("iPhone 本机处理") {
                 feature(
-                    "本机合并 MOV",
-                    "视频和 AAC 下载完成后，由 iPhone 使用 AVFoundation 合并转换，不上传成品。",
+                    "完整 FFmpeg 本机合并",
+                    "首次启动可下载完整组件；视频和 AAC 下载完成后，由 iPhone 使用 FFmpeg 无损合并，不上传成品。",
                     "iphone.gen3",
                     .green
                 )
                 feature(
                     "自动保存照片",
-                    "MOV 转换完成后自动写入照片图库，同时在 App 文件中保留一份备份。",
+                    "MP4 合并完成后自动写入照片图库，同时在 App 文件中保留一份备份。",
                     "photo.on.rectangle.angled",
                     .green
                 )
