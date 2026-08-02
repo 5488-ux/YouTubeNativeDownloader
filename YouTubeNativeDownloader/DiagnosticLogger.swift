@@ -47,7 +47,7 @@ final class DiagnosticLogger {
             if FileManager.default.fileExists(atPath: logURL.path),
                let handle = try? FileHandle(forWritingTo: logURL) {
                 defer { try? handle.close() }
-                try? handle.seekToEnd()
+                _ = try? handle.seekToEnd()
                 try? handle.write(contentsOf: data)
             } else {
                 try? data.write(to: logURL, options: .atomic)

@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import UIKit
 
@@ -44,7 +44,7 @@ final class DownloadTransfer: NSObject, URLSessionDownloadDelegate, @unchecked S
         progress: @escaping @Sendable (TransferProgress) -> Void
     ) async throws -> URL {
         DiagnosticLogger.shared.info("创建后台下载; host=\(source.url.host ?? "unknown"); expectedBytes=\(source.contentLength ?? 0); cellular=\(allowsCellular)")
-        try await withCheckedThrowingContinuation { continuation in
+        return try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
             self.progressHandler = progress
             self.fileExtension = source.width == nil ? "m4a" : "mp4"
