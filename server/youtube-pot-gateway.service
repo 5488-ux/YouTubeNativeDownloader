@@ -1,0 +1,22 @@
+[Unit]
+Description=YouTube iOS PO Token gateway
+After=network-online.target youtube-pot-provider.service
+Wants=network-online.target
+Requires=youtube-pot-provider.service
+
+[Service]
+Type=simple
+User=www
+Group=www
+WorkingDirectory=/opt/youtube-pot-gateway
+ExecStart=/usr/bin/node /opt/youtube-pot-gateway/youtube-pot-gateway.mjs
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/youtube-pot-gateway
+
+[Install]
+WantedBy=multi-user.target

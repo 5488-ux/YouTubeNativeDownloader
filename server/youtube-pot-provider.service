@@ -1,0 +1,19 @@
+[Unit]
+Description=YouTube BgUtils PO Token provider
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www
+Group=www
+WorkingDirectory=/opt/bgutil-ytdlp-pot-provider/server
+ExecStart=/usr/local/bin/deno run --allow-env --allow-net --allow-ffi=. --allow-read=. src/main.ts --port 4416
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

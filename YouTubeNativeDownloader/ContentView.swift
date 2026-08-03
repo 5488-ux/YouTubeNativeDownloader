@@ -660,8 +660,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "4.2"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "21"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "4.3"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "22"
         return "\(version) (\(build))"
     }
 }
@@ -740,6 +740,16 @@ private struct ReleaseNote: Identifiable {
     var id: String { version }
 
     static let all: [ReleaseNote] = [
+        ReleaseNote(
+            version: "4.3",
+            title: "PO Token 与播放器挑战",
+            changes: [
+                "按 YouTube 当前规则为每个视频自动生成专属 PO Token。",
+                "手机本地解析出的 Google 视频与音频直链会自动携带 Token，并修正 n 播放器挑战，修复 HTTP 403。",
+                "服务器只生成几百字节 Token，不解析或中转媒体文件。",
+                "Cookie 继续只保存在 iPhone 钥匙串，不会上传到 Token 服务。"
+            ]
+        ),
         ReleaseNote(
             version: "4.2",
             title: "绕过媒体直链 403",
