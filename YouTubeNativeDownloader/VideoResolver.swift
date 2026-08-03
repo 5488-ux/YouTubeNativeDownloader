@@ -301,11 +301,34 @@ final class VideoResolver {
                 embedURL: nil
             )
         ]
-        let profiles = authenticatedProfiles + anonymousProfiles
+        let profiles = authenticatedProfiles.sorted {
+            ($0.name == "MWEB" ? 0 : 1) < ($1.name == "MWEB" ? 0 : 1)
+        } + anonymousProfiles
+
+        guard let playerURL else {
+            throw DownloaderError.extractionFailed("页面中没有 YouTube 播放器地址，无法启动本机挑战组件")
+        }
+        let initialAccess = try await LocalYouTubeRuntime.shared.mediaAccess(
+            contentBinding: videoID,
+            playerURL: playerURL,
+            nChallenges: [],
+            signatureChallenges: [],
+            cookieHeader: cookie
+        )
 
         var lastReason = "YouTube 没有返回播放格式"
         var sawCipheredFormats = false
-        var mediaAccess: MediaAccess?
+        let gvsContentBinding = cookie.isEmpty
+            ? visitorData
+            : (sessionContext.delegatedSessionID ?? visitorData)
+        if gvsContentBinding == nil {
+            DiagnosticLogger.shared.warning("页面缺少 GVS Token 会话绑定，媒体请求可能被 YouTube 拒绝")
+        }
+        var mediaAccess: MediaAccess? = MediaAccess(
+            poToken: initialAccess.poToken,
+            solvedN: [:],
+            solvedSignatures: [:]
+        )
         for profile in profiles {
             do {
                 let response = try await playerResponse(
@@ -314,7 +337,8 @@ final class VideoResolver {
                     visitorData: visitorData,
                     cookie: cookie,
                     sessionContext: sessionContext,
-                    profile: profile
+                    profile: profile,
+                    poToken: initialAccess.poToken
                 )
                 let playability = response["playabilityStatus"] as? [String: Any]
                 let status = playability?["status"] as? String ?? "UNKNOWN"
@@ -331,29 +355,30 @@ final class VideoResolver {
                 let formats = ((streaming?["formats"] as? [[String: Any]]) ?? [])
                     + ((streaming?["adaptiveFormats"] as? [[String: Any]]) ?? [])
                 if !formats.isEmpty, ["MWEB", "WEB"].contains(profile.name) {
-                    guard let playerURL else {
-                        throw DownloaderError.extractionFailed("页面中没有 YouTube 播放器地址，无法处理媒体挑战")
-                    }
                     let nChallenges = Array(Set(
                         formats.compactMap(Self.rawMediaURL).compactMap(Self.nChallenge)
                     ))
                     let signatureChallenges = Array(Set(formats.compactMap(Self.signatureChallenge)))
-                    if !nChallenges.isEmpty || !signatureChallenges.isEmpty {
-                        mediaAccess = try await fetchMediaAccess(
-                            videoID: videoID,
-                            playerURL: playerURL,
-                            nChallenges: nChallenges,
-                            signatureChallenges: signatureChallenges
-                        )
+                    guard let gvsContentBinding else {
+                        throw DownloaderError.extractionFailed("页面缺少 Visitor Data 或账号 Data Sync ID，无法生成 GVS Token")
                     }
+                    mediaAccess = try await fetchMediaAccess(
+                        contentBinding: gvsContentBinding,
+                        playerURL: playerURL,
+                        nChallenges: nChallenges,
+                        signatureChallenges: signatureChallenges
+                    )
                 }
+                let accessForProfile = ["WEB", "MWEB", "WEB_EMBEDDED_PLAYER"].contains(profile.name)
+                    ? mediaAccess
+                    : nil
                 let candidates = formats.compactMap {
                     makeCandidate(
                         $0,
                         cookie: cookie,
                         userAgent: profile.userAgent,
                         watchURL: watchURL,
-                        mediaAccess: mediaAccess
+                        mediaAccess: accessForProfile
                     )
                 }
                 let hlsVideo = kind == .video
@@ -397,6 +422,11 @@ final class VideoResolver {
         if sawCipheredFormats {
             throw DownloaderError.extractionFailed("YouTube 只返回了加密媒体地址，本机 EJS 未能解开，请更新 App 内置解析组件。")
         }
+        if lastReason.localizedCaseInsensitiveContains("not a bot") {
+            throw DownloaderError.extractionFailed(
+                "YouTube 仍拒绝当前手机网络或登录会话。请重新导出最新 Cookie；若仍失败，切换 Wi-Fi/蜂窝网络后重试。"
+            )
+        }
         throw DownloaderError.extractionFailed("\(lastReason)。Cookie 可能已失效，请在设置中重新填写。")
     }
 
@@ -406,7 +436,8 @@ final class VideoResolver {
         visitorData: String?,
         cookie: String,
         sessionContext: SessionContext,
-        profile: ClientProfile
+        profile: ClientProfile,
+        poToken: String
     ) async throws -> [String: Any] {
         var client: [String: Any] = [
             "clientName": profile.name,
@@ -440,7 +471,7 @@ final class VideoResolver {
         if let embedURL = profile.embedURL {
             context["thirdParty"] = ["embedUrl": embedURL]
         }
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "context": context,
             "videoId": videoID,
             "contentCheckOk": true,
@@ -449,6 +480,10 @@ final class VideoResolver {
                 "contentPlaybackContext": ["html5Preference": "HTML5_PREF_WANTS"]
             ]
         ]
+        if ["WEB", "MWEB", "WEB_EMBEDDED_PLAYER"].contains(profile.name) {
+            body["serviceIntegrityDimensions"] = ["poToken": poToken]
+            DiagnosticLogger.shared.info("Innertube Player 请求携带本机 PO Token; client=\(profile.name); tokenBytes=\(poToken.utf8.count)")
+        }
         let endpoint = URL(string: "https://www.youtube.com/youtubei/v1/player?key=\(apiKey)&prettyPrint=false")!
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -464,7 +499,22 @@ final class VideoResolver {
             applyCookieAuthorization(to: &request, cookie: cookie, sessionContext: sessionContext)
         }
 
-        let (data, _) = try await requestData(request, stage: "请求 Innertube \(profile.name)")
+        let data: Data
+        if ["WEB", "MWEB", "WEB_EMBEDDED_PLAYER"].contains(profile.name) {
+            let forbiddenWebKitHeaders = Set(["cookie", "user-agent", "origin", "referer"])
+            let webKitHeaders = (request.allHTTPHeaderFields ?? [:]).filter {
+                !forbiddenWebKitHeaders.contains($0.key.lowercased())
+            }
+            data = try await LocalYouTubeRuntime.shared.playerResponse(
+                endpoint: endpoint,
+                body: body,
+                headers: webKitHeaders,
+                cookieHeader: requestCookie
+            )
+        } else {
+            let response = try await requestData(request, stage: "请求 Innertube \(profile.name)")
+            data = response.0
+        }
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw DownloaderError.extractionFailed("Innertube 返回内容无法识别。")
         }
@@ -738,13 +788,13 @@ final class VideoResolver {
     }
 
     private func fetchMediaAccess(
-        videoID: String,
+        contentBinding: String,
         playerURL: URL,
         nChallenges: [String],
         signatureChallenges: [String]
     ) async throws -> MediaAccess {
         let access = try await LocalYouTubeRuntime.shared.mediaAccess(
-            videoID: videoID,
+            contentBinding: contentBinding,
             playerURL: playerURL,
             nChallenges: nChallenges,
             signatureChallenges: signatureChallenges

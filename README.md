@@ -1,13 +1,15 @@
 # 本地下载器 iOS
 
-原生 SwiftUI YouTube 下载器，支持 iOS 16.1 及以上版本（含 iOS 26）。4.4 已把原服务器的 PO Token 与播放器挑战能力完整放进 IPA：App 不再调用自建解析、授权或媒体中转接口。
+原生 SwiftUI YouTube 下载器，支持 iOS 16.1 及以上版本（含 iOS 26）。4.5 已把原服务器的 PO Token 与播放器挑战能力完整放进 IPA：App 不再调用自建解析、授权或媒体中转接口。
 
-## 4.4 功能
+## 4.5 功能
 
 - 支持普通 YouTube、`youtu.be`、Shorts、Embed 和 Live 链接。
 - 支持最佳画质、1080P、720P、480P，优先选择 iPhone 兼容的 H.264 视频与 AAC 音频。
 - iPhone 本机请求 YouTube 页面与 Innertube，提取视频信息和媒体格式。
 - IPA 内置 BgUtils BotGuard，本机获取挑战并生成每视频 PO Token。
+- Player Token 绑定视频 ID 并写入 Innertube 请求；GVS Token 独立绑定账号 Data Sync Session ID 或匿名 Visitor Data，不能混成同一枚。
+- WEB/MWEB Player 通过隐藏 WebKit 网络栈请求，手动 Cookie、浏览器指纹、BotGuard 与 Token 保持在同一手机会话。
 - IPA 内置 yt-dlp EJS，本机读取当前播放器脚本并解开 `n` 与 `signatureCipher` 播放器挑战。
 - 不调用 `youtube.789113.cn/ios-api/resolve`、`/ios-api/media-access` 或 `/ios-api/pot`。
 - 设置中可以粘贴 Cookie 请求头、Netscape `cookies.txt` 或常见 JSON Cookie 导出。

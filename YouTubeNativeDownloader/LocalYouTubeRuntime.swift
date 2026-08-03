@@ -10,35 +10,39 @@ struct LocalMediaAccess: Sendable {
 @MainActor
 final class LocalYouTubeRuntime: NSObject, WKNavigationDelegate {
     static let shared = LocalYouTubeRuntime()
+    private static let webUserAgent = "Mozilla/5.0 (iPad; CPU OS 16_7_10 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1,gzip(gfe)"
 
     private var webView: WKWebView?
     private var preparationTask: Task<Void, Error>?
     private var navigationContinuation: CheckedContinuation<Void, Error>?
     private var navigationID: UUID?
     private var isPrepared = false
+    private var installedCookieHeader: String?
 
     private override init() {
         super.init()
     }
 
     func mediaAccess(
-        videoID: String,
+        contentBinding: String,
         playerURL: URL,
         nChallenges: [String],
-        signatureChallenges: [String]
+        signatureChallenges: [String],
+        cookieHeader: String = ""
     ) async throws -> LocalMediaAccess {
         try await prepareIfNeeded()
         guard let webView else {
             throw Self.runtimeError("本机 YouTube 运行环境没有启动")
         }
+        try await installCookies(cookieHeader, in: webView.configuration.websiteDataStore.httpCookieStore)
 
         DiagnosticLogger.shared.info(
-            "开始本机生成媒体授权; videoID=\(videoID); nChallenges=\(nChallenges.count); " +
+            "开始本机生成媒体授权; bindingBytes=\(contentBinding.utf8.count); nChallenges=\(nChallenges.count); " +
             "signatureChallenges=\(signatureChallenges.count); runtime=WebKit+BgUtils+yt-dlp-ejs"
         )
 
         let script = """
-        const videoID = arguments.videoID;
+        const contentBinding = arguments.contentBinding;
         const playerURL = arguments.playerURL;
         const nChallenges = arguments.nChallenges;
         const signatureChallenges = arguments.signatureChallenges;
@@ -47,31 +51,33 @@ final class LocalYouTubeRuntime: NSObject, WKNavigationDelegate {
             throw new Error('本机 YouTube 组件尚未加载');
         }
 
-        const [poToken, playerResponse] = await Promise.all([
-            globalThis.LocalYouTubePO.generatePoToken(videoID),
-            fetch(playerURL, { credentials: 'omit', cache: 'no-store' })
-        ]);
-        if (!playerResponse.ok) {
-            throw new Error(`播放器脚本请求失败：HTTP ${playerResponse.status}`);
-        }
-
-        const player = await playerResponse.text();
+        const poTokenPromise = globalThis.LocalYouTubePO.generatePoToken(contentBinding);
         const requests = [];
         if (nChallenges.length) requests.push({ type: 'n', challenges: nChallenges });
         if (signatureChallenges.length) requests.push({ type: 'sig', challenges: signatureChallenges });
-        const result = globalThis.YTDLPEJS.default({
-            type: 'player',
-            player,
-            requests,
-            output_preprocessed: false
-        });
-        if (result?.type !== 'result' || result.responses?.some(item => item.type !== 'result')) {
-            const failed = result?.responses?.find(item => item.type !== 'result');
-            throw new Error(failed?.error || 'yt-dlp EJS 未能解开播放器挑战');
+        let solvedN = {};
+        let solvedSignatures = {};
+        if (requests.length) {
+            const playerResponse = await fetch(playerURL, { credentials: 'omit', cache: 'no-store' });
+            if (!playerResponse.ok) {
+                throw new Error(`播放器脚本请求失败：HTTP ${playerResponse.status}`);
+            }
+            const player = await playerResponse.text();
+            const result = globalThis.YTDLPEJS.default({
+                type: 'player',
+                player,
+                requests,
+                output_preprocessed: false
+            });
+            if (result?.type !== 'result' || result.responses?.some(item => item.type !== 'result')) {
+                const failed = result?.responses?.find(item => item.type !== 'result');
+                throw new Error(failed?.error || 'yt-dlp EJS 未能解开播放器挑战');
+            }
+            let index = 0;
+            solvedN = nChallenges.length ? result.responses[index++].data : {};
+            solvedSignatures = signatureChallenges.length ? result.responses[index++].data : {};
         }
-        let index = 0;
-        const solvedN = nChallenges.length ? result.responses[index++].data : {};
-        const solvedSignatures = signatureChallenges.length ? result.responses[index++].data : {};
+        const poToken = await poTokenPromise;
         if (!poToken || nChallenges.some(value => !solvedN[value]) ||
             signatureChallenges.some(value => !solvedSignatures[value])) {
             throw new Error('本机媒体授权结果不完整');
@@ -83,7 +89,7 @@ final class LocalYouTubeRuntime: NSObject, WKNavigationDelegate {
             let value = try await webView.callAsyncJavaScript(
                 script,
                 arguments: [
-                    "videoID": videoID,
+                    "contentBinding": contentBinding,
                     "playerURL": playerURL.absoluteString,
                     "nChallenges": nChallenges,
                     "signatureChallenges": signatureChallenges
@@ -100,7 +106,7 @@ final class LocalYouTubeRuntime: NSObject, WKNavigationDelegate {
                 throw Self.runtimeError("本机媒体授权返回格式错误")
             }
             DiagnosticLogger.shared.info(
-                "本机媒体授权成功; videoID=\(videoID); tokenBytes=\(poToken.utf8.count); " +
+                "本机媒体授权成功; tokenBytes=\(poToken.utf8.count); " +
                 "solvedN=\(solvedN.count); solvedSignatures=\(solvedSignatures.count)"
             )
             return LocalMediaAccess(
@@ -112,6 +118,62 @@ final class LocalYouTubeRuntime: NSObject, WKNavigationDelegate {
             DiagnosticLogger.shared.error(error, stage: "本机处理 PO Token 与 n 挑战")
             resetRuntime()
             throw Self.runtimeError("本机 YouTube 解析组件运行失败：\(error.localizedDescription)", underlying: error)
+        }
+    }
+
+    func playerResponse(
+        endpoint: URL,
+        body: [String: Any],
+        headers: [String: String],
+        cookieHeader: String
+    ) async throws -> Data {
+        try await prepareIfNeeded()
+        guard let webView else {
+            throw Self.runtimeError("本机 YouTube 运行环境没有启动")
+        }
+
+        try await installCookies(cookieHeader, in: webView.configuration.websiteDataStore.httpCookieStore)
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        guard let bodyText = String(data: bodyData, encoding: .utf8) else {
+            throw Self.runtimeError("Innertube 请求 JSON 编码失败")
+        }
+
+        let script = """
+        const response = await fetch(arguments.endpoint, {
+            method: 'POST',
+            headers: arguments.headers,
+            body: arguments.body,
+            credentials: 'include',
+            cache: 'no-store'
+        });
+        return { status: response.status, text: await response.text() };
+        """
+
+        do {
+            let value = try await webView.callAsyncJavaScript(
+                script,
+                arguments: [
+                    "endpoint": endpoint.absoluteString,
+                    "headers": headers,
+                    "body": bodyText
+                ],
+                in: nil,
+                contentWorld: .page
+            )
+            guard let result = value as? [String: Any],
+                  let status = (result["status"] as? NSNumber)?.intValue,
+                  let text = result["text"] as? String,
+                  let data = text.data(using: .utf8) else {
+                throw Self.runtimeError("WebKit Innertube 返回格式错误")
+            }
+            DiagnosticLogger.shared.info("WebKit Innertube 响应; HTTP=\(status); bytes=\(data.count)")
+            guard (200...299).contains(status) else {
+                throw Self.runtimeError("WebKit Innertube 返回 HTTP \(status)：\(String(text.prefix(500)))")
+            }
+            return data
+        } catch {
+            DiagnosticLogger.shared.error(error, stage: "WebKit 请求 Innertube Player")
+            throw error
         }
     }
 
@@ -144,6 +206,7 @@ final class LocalYouTubeRuntime: NSObject, WKNavigationDelegate {
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.customUserAgent = Self.webUserAgent
         webView.navigationDelegate = self
         self.webView = webView
 
@@ -188,8 +251,36 @@ final class LocalYouTubeRuntime: NSObject, WKNavigationDelegate {
         return source
     }
 
+    private func installCookies(_ header: String, in store: WKHTTPCookieStore) async throws {
+        if installedCookieHeader == header { return }
+        let existingCookies: [HTTPCookie] = await withCheckedContinuation { continuation in
+            store.getAllCookies { cookies in
+                continuation.resume(returning: cookies)
+            }
+        }
+        for cookie in existingCookies where cookie.domain.lowercased().contains("youtube.com") {
+            store.delete(cookie)
+        }
+
+        let cookies = Self.cookies(from: header)
+        for cookie in cookies {
+            await withCheckedContinuation { continuation in
+                store.setCookie(cookie) {
+                    continuation.resume()
+                }
+            }
+        }
+        if !cookies.isEmpty {
+            DiagnosticLogger.shared.info("Cookie 已注入本机 WebKit 会话; count=\(cookies.count)")
+        } else {
+            DiagnosticLogger.shared.info("本机 WebKit 会话已清除 YouTube Cookie")
+        }
+        installedCookieHeader = header
+    }
+
     private func resetRuntime() {
         isPrepared = false
+        installedCookieHeader = nil
         navigationID = nil
         if let navigationContinuation {
             self.navigationContinuation = nil
@@ -238,5 +329,22 @@ final class LocalYouTubeRuntime: NSObject, WKNavigationDelegate {
             result[key] = text
         }
         return result
+    }
+
+    private static func cookies(from header: String) -> [HTTPCookie] {
+        header.split(separator: ";").compactMap { part in
+            let pair = part.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let separator = pair.firstIndex(of: "=") else { return nil }
+            let name = String(pair[..<separator]).trimmingCharacters(in: .whitespaces)
+            let value = String(pair[pair.index(after: separator)...])
+            guard !name.isEmpty else { return nil }
+            return HTTPCookie(properties: [
+                .domain: ".youtube.com",
+                .path: "/",
+                .name: name,
+                .value: value,
+                .secure: "TRUE"
+            ])
+        }
     }
 }

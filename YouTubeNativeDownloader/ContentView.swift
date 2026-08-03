@@ -660,8 +660,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "4.4"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "23"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "4.5"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "24"
         return "\(version) (\(build))"
     }
 }
@@ -740,6 +740,18 @@ private struct ReleaseNote: Identifiable {
     var id: String { version }
 
     static let all: [ReleaseNote] = [
+        ReleaseNote(
+            version: "4.5",
+            title: "PO Token 提前解锁 Player",
+            changes: [
+                "先在 iPhone 本机生成每视频 PO Token，再请求 Innertube Player。",
+                "Player 请求携带 serviceIntegrityDimensions.poToken，避免在返回格式前就被 LOGIN_REQUIRED 拦截。",
+                "Player Token 绑定视频 ID；GVS Token 按登录状态绑定 Data Sync Session ID 或 Visitor Data，不再混用。",
+                "WEB/MWEB Player 改走隐藏 WebKit 网络栈，手动 Cookie、浏览器指纹、BotGuard 与 Token 使用同一手机会话。",
+                "Web PO Token 只用于 WEB、MWEB 与 Web Embedded，不再错误附加到 iOS、Android 或 TV 客户端。",
+                "补充 Player Token 阶段日志，能直接看出 Token 是否真正参与解析。"
+            ]
+        ),
         ReleaseNote(
             version: "4.4",
             title: "服务器能力完整搬进 IPA",
@@ -1084,7 +1096,7 @@ private struct FeatureGuideView: View {
                 )
                 feature(
                     "内置 PO Token 与 EJS",
-                    "BgUtils BotGuard 和 yt-dlp EJS 已打进 IPA，本机生成 PO Token、解开 n 与加密签名，不连接自建解析服务。",
+                    "BgUtils BotGuard 和 yt-dlp EJS 已打进 IPA，本机分别生成 Player/GVS Token、解开 n 与加密签名，不连接自建解析服务。",
                     "cpu.fill",
                     .indigo
                 )
