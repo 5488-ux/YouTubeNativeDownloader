@@ -155,23 +155,10 @@ enum YouTubeCookieStore {
 }
 
 final class VideoResolver {
-    private struct MediaAccessResponse: Decodable {
-        let ok: Bool
-        let poToken: String?
-        let solvedN: String?
-        let message: String?
-
-        enum CodingKeys: String, CodingKey {
-            case ok, message
-            case poToken = "po_token"
-            case solvedN = "solved_n"
-        }
-    }
-
     private struct MediaAccess {
         let poToken: String
-        let rawN: String
-        let solvedN: String
+        let solvedN: [String: String]
+        let solvedSignatures: [String: String]
     }
 
     private struct ClientProfile {
@@ -314,7 +301,7 @@ final class VideoResolver {
                 embedURL: nil
             )
         ]
-        let profiles = cookie.isEmpty ? anonymousProfiles : authenticatedProfiles + anonymousProfiles
+        let profiles = authenticatedProfiles + anonymousProfiles
 
         var lastReason = "YouTube 没有返回播放格式"
         var sawCipheredFormats = false
@@ -343,18 +330,22 @@ final class VideoResolver {
                 let streaming = response["streamingData"] as? [String: Any]
                 let formats = ((streaming?["formats"] as? [[String: Any]]) ?? [])
                     + ((streaming?["adaptiveFormats"] as? [[String: Any]]) ?? [])
-                if !formats.isEmpty, ["MWEB", "WEB"].contains(profile.name), mediaAccess == nil {
+                if !formats.isEmpty, ["MWEB", "WEB"].contains(profile.name) {
                     guard let playerURL else {
                         throw DownloaderError.extractionFailed("页面中没有 YouTube 播放器地址，无法处理媒体挑战")
                     }
-                    guard let rawN = formats.lazy.compactMap(Self.mediaURL).compactMap(Self.nChallenge).first else {
-                        throw DownloaderError.extractionFailed("媒体地址缺少 n 挑战参数")
+                    let nChallenges = Array(Set(
+                        formats.compactMap(Self.rawMediaURL).compactMap(Self.nChallenge)
+                    ))
+                    let signatureChallenges = Array(Set(formats.compactMap(Self.signatureChallenge)))
+                    if !nChallenges.isEmpty || !signatureChallenges.isEmpty {
+                        mediaAccess = try await fetchMediaAccess(
+                            videoID: videoID,
+                            playerURL: playerURL,
+                            nChallenges: nChallenges,
+                            signatureChallenges: signatureChallenges
+                        )
                     }
-                    mediaAccess = try await fetchMediaAccess(
-                        videoID: videoID,
-                        playerURL: playerURL,
-                        rawN: rawN
-                    )
                 }
                 let candidates = formats.compactMap {
                     makeCandidate(
@@ -404,7 +395,7 @@ final class VideoResolver {
             throw DownloaderError.extractionFailed("YouTube 要求登录验证。请到设置粘贴 YouTube Cookie 后重试。")
         }
         if sawCipheredFormats {
-            throw DownloaderError.extractionFailed("YouTube 只返回了加密媒体地址，本机解析规则需要随 App 更新。")
+            throw DownloaderError.extractionFailed("YouTube 只返回了加密媒体地址，本机 EJS 未能解开，请更新 App 内置解析组件。")
         }
         throw DownloaderError.extractionFailed("\(lastReason)。Cookie 可能已失效，请在设置中重新填写。")
     }
@@ -541,8 +532,7 @@ final class VideoResolver {
         mediaAccess: MediaAccess?
     ) -> Candidate? {
         guard let mimeType = format["mimeType"] as? String,
-              let rawMediaURL = Self.mediaURL(from: format) else { return nil }
-        let mediaURL = mediaAccess.flatMap { Self.applyingMediaAccess($0, to: rawMediaURL) } ?? rawMediaURL
+              let mediaURL = Self.mediaURL(from: format, mediaAccess: mediaAccess) else { return nil }
         let codec = Self.codec(from: mimeType) ?? "unknown"
         let contentLength = Self.int64(format["contentLength"])
         let headers: [String: String] = [
@@ -709,63 +699,69 @@ final class VideoResolver {
         }
     }
 
-    private static func mediaURL(from format: [String: Any]) -> URL? {
+    private static func rawMediaURL(from format: [String: Any]) -> URL? {
         if let value = format["url"] as? String { return URL(string: value) }
         guard let cipher = (format["signatureCipher"] as? String) ?? (format["cipher"] as? String),
               let components = URLComponents(string: "https://local.invalid/?\(cipher)"),
-              let urlValue = components.queryItems?.first(where: { $0.name == "url" })?.value,
-              var mediaComponents = URLComponents(string: urlValue) else { return nil }
-        let signature = components.queryItems?.first(where: { ["sig", "signature"].contains($0.name) })?.value
-        if let signature {
-            let parameter = components.queryItems?.first(where: { $0.name == "sp" })?.value ?? "signature"
-            var items = mediaComponents.queryItems ?? []
-            items.append(URLQueryItem(name: parameter, value: signature))
-            mediaComponents.queryItems = items
-            return mediaComponents.url
-        }
-        return nil
+              let urlValue = components.queryItems?.first(where: { $0.name == "url" })?.value else { return nil }
+        return URL(string: urlValue)
     }
 
-    private func fetchMediaAccess(videoID: String, playerURL: URL, rawN: String) async throws -> MediaAccess {
-        let endpoint = URL(string: "https://youtube.789113.cn/ios-api/media-access")!
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 70
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("YouTubeNativeDownloader/4.3", forHTTPHeaderField: "User-Agent")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "video_id": videoID,
-            "player_url": playerURL.absoluteString,
-            "n": rawN
-        ])
-        DiagnosticLogger.shared.info("请求媒体访问授权; videoID=\(videoID); cookieUpload=false; nBytes=\(rawN.utf8.count)")
+    private static func signatureChallenge(from format: [String: Any]) -> String? {
+        guard let cipher = (format["signatureCipher"] as? String) ?? (format["cipher"] as? String),
+              let components = URLComponents(string: "https://local.invalid/?\(cipher)") else { return nil }
+        return components.queryItems?.first(where: { $0.name == "s" })?.value
+    }
 
-        let (data, http) = try await requestData(request, stage: "处理 PO Token 与 n 挑战")
-        let decoded: MediaAccessResponse
-        do {
-            decoded = try JSONDecoder().decode(MediaAccessResponse.self, from: data)
-        } catch {
-            DiagnosticLogger.shared.error(error, stage: "媒体授权 JSON 解码; HTTP=\(http.statusCode)")
-            throw DownloaderError.extractionFailed("媒体授权服务返回了无法识别的数据")
+    private static func mediaURL(from format: [String: Any], mediaAccess: MediaAccess?) -> URL? {
+        guard let rawURL = rawMediaURL(from: format) else { return nil }
+        var result = rawURL
+
+        if let cipher = (format["signatureCipher"] as? String) ?? (format["cipher"] as? String),
+           let components = URLComponents(string: "https://local.invalid/?\(cipher)") {
+            let directSignature = components.queryItems?
+                .first(where: { ["sig", "signature"].contains($0.name) })?.value
+            let encryptedSignature = components.queryItems?.first(where: { $0.name == "s" })?.value
+            let signature = directSignature ?? encryptedSignature.flatMap { mediaAccess?.solvedSignatures[$0] }
+            guard let signature else { return nil }
+            let parameter = components.queryItems?.first(where: { $0.name == "sp" })?.value ?? "signature"
+            guard var mediaComponents = URLComponents(url: result, resolvingAgainstBaseURL: false) else { return nil }
+            var items = mediaComponents.queryItems ?? []
+            items.removeAll { $0.name == parameter }
+            items.append(URLQueryItem(name: parameter, value: signature))
+            mediaComponents.queryItems = items
+            guard let signedURL = mediaComponents.url else { return nil }
+            result = signedURL
         }
-        guard decoded.ok,
-              let token = decoded.poToken, !token.isEmpty,
-              let solvedN = decoded.solvedN, !solvedN.isEmpty else {
-            throw DownloaderError.extractionFailed(decoded.message ?? "媒体授权生成失败")
-        }
-        DiagnosticLogger.shared.info(
-            "媒体访问授权成功; videoID=\(videoID); tokenBytes=\(token.utf8.count); solvedNBytes=\(solvedN.utf8.count)"
+
+        return mediaAccess.flatMap { applyingMediaAccess($0, to: result) } ?? result
+    }
+
+    private func fetchMediaAccess(
+        videoID: String,
+        playerURL: URL,
+        nChallenges: [String],
+        signatureChallenges: [String]
+    ) async throws -> MediaAccess {
+        let access = try await LocalYouTubeRuntime.shared.mediaAccess(
+            videoID: videoID,
+            playerURL: playerURL,
+            nChallenges: nChallenges,
+            signatureChallenges: signatureChallenges
         )
-        return MediaAccess(poToken: token, rawN: rawN, solvedN: solvedN)
+        return MediaAccess(
+            poToken: access.poToken,
+            solvedN: access.solvedN,
+            solvedSignatures: access.solvedSignatures
+        )
     }
 
     private static func applyingMediaAccess(_ access: MediaAccess, to url: URL) -> URL? {
         guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
         var items = components.queryItems ?? []
         items = items.map { item in
-            guard item.name == "n", item.value == access.rawN else { return item }
-            return URLQueryItem(name: "n", value: access.solvedN)
+            guard item.name == "n", let value = item.value, let solved = access.solvedN[value] else { return item }
+            return URLQueryItem(name: "n", value: solved)
         }
         items.removeAll { $0.name == "pot" }
         items.append(URLQueryItem(name: "pot", value: access.poToken))

@@ -660,8 +660,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "4.3"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "22"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "4.4"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "23"
         return "\(version) (\(build))"
     }
 }
@@ -740,6 +740,16 @@ private struct ReleaseNote: Identifiable {
     var id: String { version }
 
     static let all: [ReleaseNote] = [
+        ReleaseNote(
+            version: "4.4",
+            title: "服务器能力完整搬进 IPA",
+            changes: [
+                "内置 BgUtils BotGuard，在 iPhone 本机生成每视频 PO Token。",
+                "内置 yt-dlp EJS，在 iPhone 本机执行播放器脚本并解开 n 与 signatureCipher 挑战。",
+                "移除 App 对 youtube.789113.cn 媒体授权接口的全部调用。",
+                "Cookie、Innertube 解析、媒体下载、FFmpeg 合并、保存、日志和后台功能全部保留在手机端。"
+            ]
+        ),
         ReleaseNote(
             version: "4.3",
             title: "PO Token 与播放器挑战",
@@ -1068,9 +1078,15 @@ private struct FeatureGuideView: View {
                 )
                 feature(
                     "本机解析与 Cookie",
-                    "iPhone 直接解析 YouTube；需要登录时可把 Cookie 安全保存到本机钥匙串。",
+                    "iPhone 直接解析 YouTube；需要登录时可把 Cookie 安全保存到本机钥匙串。Cookie 不会上传。",
                     "key.fill",
                     .blue
+                )
+                feature(
+                    "内置 PO Token 与 EJS",
+                    "BgUtils BotGuard 和 yt-dlp EJS 已打进 IPA，本机生成 PO Token、解开 n 与加密签名，不连接自建解析服务。",
+                    "cpu.fill",
+                    .indigo
                 )
                 feature(
                     "详细错误日志",
