@@ -2,13 +2,14 @@
 
 原生 SwiftUI YouTube 下载器，支持 iOS 16.1 及以上版本（含 iOS 26）。4.0 起不再使用自建解析服务器：YouTube 解析、媒体下载和音视频合并均由 iPhone 完成。
 
-## 4.0 功能
+## 4.1 功能
 
 - 支持普通 YouTube、`youtu.be`、Shorts、Embed 和 Live 链接。
 - 支持最佳画质、1080P、720P、480P，优先选择 iPhone 兼容的 H.264 视频与 AAC 音频。
 - 使用 iPhone 直接请求 YouTube Innertube，不连接 `youtube.789113.cn/ios-api/resolve`。
 - 设置中可以粘贴 Cookie 请求头、Netscape `cookies.txt` 或常见 JSON Cookie 导出。
 - Cookie 仅保存在 iOS 钥匙串，不写入诊断日志。
+- Cookie 鉴权根据客户端能力分流，并支持三种 SAPISID 哈希及多账号/品牌频道会话头。
 - iPhone 直接从 YouTube/Google 媒体地址下载，不再使用服务器中转。
 - 视频和 AAC 分别下载，完成后使用标准 WASI FFmpeg 5.1.7 在手机上无损合并为 MP4。
 - MP4 自动保存到照片，同时在 App 文件中保留副本；音频保存为 M4A。

@@ -660,8 +660,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "4.0"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "19"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "4.1"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "20"
         return "\(version) (\(build))"
     }
 }
@@ -740,6 +740,16 @@ private struct ReleaseNote: Identifiable {
     var id: String { version }
 
     static let all: [ReleaseNote] = [
+        ReleaseNote(
+            version: "4.1",
+            title: "修复 Cookie 客户端鉴权",
+            changes: [
+                "Cookie 只发送给 WEB、MWEB 与 TV 等明确支持登录 Cookie 的 Innertube 客户端。",
+                "按 YouTube 当前规则生成 SAPISIDHASH、SAPISID1PHASH 与 SAPISID3PHASH。",
+                "补齐账号索引、委托频道和登录状态请求头。",
+                "HTTP 400 等解析失败会记录 YouTube 返回的具体错误正文。"
+            ]
+        ),
         ReleaseNote(
             version: "4.0",
             title: "完全本机解析",

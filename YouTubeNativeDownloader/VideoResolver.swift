@@ -159,6 +159,15 @@ final class VideoResolver {
         let numericName: String
         let version: String
         let userAgent: String
+        let supportsCookies: Bool
+        let embedURL: String?
+    }
+
+    private struct SessionContext {
+        let sessionIndex: String?
+        let delegatedSessionID: String?
+        let userSessionID: String?
+        let loggedIn: Bool
     }
 
     private struct Candidate {
@@ -175,9 +184,20 @@ final class VideoResolver {
     ) async throws -> ResolvedMedia {
         let videoID = try Self.extractVideoID(from: urlText)
         let cookie = YouTubeCookieStore.load() ?? ""
+        let storedCookieValues = Self.cookieValues(cookie)
+        let hasLoginCookie = storedCookieValues["LOGIN_INFO"] != nil
+        let hasSIDCookie = storedCookieValues["SAPISID"] != nil
+            || storedCookieValues["__Secure-1PAPISID"] != nil
+            || storedCookieValues["__Secure-3PAPISID"] != nil
         let watchURL = URL(string: "https://www.youtube.com/watch?v=\(videoID)&bpctr=9999999999&has_verified=1")!
 
-        DiagnosticLogger.shared.info("开始本机解析 YouTube; videoID=\(videoID); cookie=\(cookie.isEmpty ? "none" : "configured")")
+        DiagnosticLogger.shared.info(
+            "开始本机解析 YouTube; videoID=\(videoID); cookie=\(cookie.isEmpty ? "none" : "configured"); " +
+            "loginInfo=\(hasLoginCookie); sid=\(hasSIDCookie)"
+        )
+        if !cookie.isEmpty, !hasLoginCookie || !hasSIDCookie {
+            DiagnosticLogger.shared.warning("Cookie 缺少 LOGIN_INFO 或 SAPISID 系列字段，可能不是完整的 YouTube 登录 Cookie")
+        }
         var watchRequest = URLRequest(url: watchURL)
         watchRequest.timeoutInterval = 45
         applyCommonHeaders(to: &watchRequest, cookie: cookie, userAgent: webUserAgent)
@@ -193,28 +213,77 @@ final class VideoResolver {
             .flatMap(Self.decodeJSONString)
         let webVersion = Self.capture(#""INNERTUBE_CLIENT_VERSION":"([^"]+)""#, in: html)
             ?? "2.20260731.01.00"
+        let sessionContext = Self.sessionContext(from: html)
 
-        let profiles = [
+        let anonymousProfiles = [
             ClientProfile(
                 name: "IOS",
                 numericName: "5",
-                version: "21.30.2",
-                userAgent: "com.google.ios.youtube/21.30.2 (iPhone16,2; U; CPU iOS 18_6 like Mac OS X; zh_CN)"
+                version: "21.26.4",
+                userAgent: "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
+                supportsCookies: false,
+                embedURL: nil
             ),
             ClientProfile(
-                name: "IOS",
-                numericName: "5",
-                version: "20.10.4",
-                userAgent: "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3 like Mac OS X; en_US)"
+                name: "VISIONOS",
+                numericName: "101",
+                version: "1.02",
+                userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+                supportsCookies: false,
+                embedURL: nil
             ),
             ClientProfile(
                 name: "ANDROID_VR",
                 numericName: "28",
-                version: "1.61.48",
-                userAgent: "com.google.android.apps.youtube.vr.oculus/1.61.48 (Linux; U; Android 12; en_US; Quest 3) gzip"
-            ),
-            ClientProfile(name: "WEB", numericName: "1", version: webVersion, userAgent: webUserAgent)
+                version: "1.65.10",
+                userAgent: "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+                supportsCookies: false,
+                embedURL: nil
+            )
         ]
+        let authenticatedProfiles = [
+            ClientProfile(
+                name: "WEB",
+                numericName: "1",
+                version: webVersion,
+                userAgent: webUserAgent,
+                supportsCookies: true,
+                embedURL: nil
+            ),
+            ClientProfile(
+                name: "WEB_EMBEDDED_PLAYER",
+                numericName: "56",
+                version: webVersion,
+                userAgent: webUserAgent,
+                supportsCookies: true,
+                embedURL: "https://www.youtube.com/embed/\(videoID)"
+            ),
+            ClientProfile(
+                name: "MWEB",
+                numericName: "2",
+                version: "2.20260708.05.00",
+                userAgent: "Mozilla/5.0 (iPad; CPU OS 16_7_10 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1,gzip(gfe)",
+                supportsCookies: true,
+                embedURL: nil
+            ),
+            ClientProfile(
+                name: "TVHTML5",
+                numericName: "7",
+                version: "7.20260707.07.00",
+                userAgent: "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold (unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)",
+                supportsCookies: true,
+                embedURL: nil
+            ),
+            ClientProfile(
+                name: "TVHTML5",
+                numericName: "7",
+                version: "5.20260707",
+                userAgent: "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
+                supportsCookies: true,
+                embedURL: nil
+            )
+        ]
+        let profiles = cookie.isEmpty ? anonymousProfiles : authenticatedProfiles + anonymousProfiles
 
         var lastReason = "YouTube 没有返回播放格式"
         var sawCipheredFormats = false
@@ -225,6 +294,7 @@ final class VideoResolver {
                     apiKey: apiKey,
                     visitorData: visitorData,
                     cookie: cookie,
+                    sessionContext: sessionContext,
                     profile: profile
                 )
                 let playability = response["playabilityStatus"] as? [String: Any]
@@ -282,14 +352,17 @@ final class VideoResolver {
         apiKey: String,
         visitorData: String?,
         cookie: String,
+        sessionContext: SessionContext,
         profile: ClientProfile
     ) async throws -> [String: Any] {
         var client: [String: Any] = [
             "clientName": profile.name,
             "clientVersion": profile.version,
-            "hl": "zh-CN",
+            "hl": "en",
             "gl": "US",
-            "userAgent": profile.userAgent
+            "userAgent": profile.userAgent,
+            "timeZone": "UTC",
+            "utcOffsetMinutes": 0
         ]
         if let visitorData { client["visitorData"] = visitorData }
         if profile.name == "IOS" {
@@ -297,10 +370,25 @@ final class VideoResolver {
             client["deviceModel"] = "iPhone16,2"
             client["osName"] = "iPhone"
             client["osVersion"] = "18.6.0.22G86"
+        } else if profile.name == "VISIONOS" {
+            client["deviceMake"] = "Apple"
+            client["deviceModel"] = "RealityDevice17,1"
+            client["osName"] = "visionOS"
+            client["osVersion"] = "26.5.23O471"
+        } else if profile.name == "ANDROID_VR" {
+            client["deviceMake"] = "Oculus"
+            client["deviceModel"] = "Quest 3"
+            client["androidSdkVersion"] = 32
+            client["osName"] = "Android"
+            client["osVersion"] = "12L"
         }
 
+        var context: [String: Any] = ["client": client]
+        if let embedURL = profile.embedURL {
+            context["thirdParty"] = ["embedUrl": embedURL]
+        }
         let body: [String: Any] = [
-            "context": ["client": client],
+            "context": context,
             "videoId": videoID,
             "contentCheckOk": true,
             "racyCheckOk": true,
@@ -313,12 +401,15 @@ final class VideoResolver {
         request.httpMethod = "POST"
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 45
-        applyCommonHeaders(to: &request, cookie: cookie, userAgent: profile.userAgent)
+        let requestCookie = profile.supportsCookies ? cookie : ""
+        applyCommonHeaders(to: &request, cookie: requestCookie, userAgent: profile.userAgent)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(profile.numericName, forHTTPHeaderField: "X-YouTube-Client-Name")
         request.setValue(profile.version, forHTTPHeaderField: "X-YouTube-Client-Version")
         if let visitorData { request.setValue(visitorData, forHTTPHeaderField: "X-Goog-Visitor-Id") }
-        applyCookieAuthorization(to: &request, cookie: cookie)
+        if profile.supportsCookies {
+            applyCookieAuthorization(to: &request, cookie: cookie, sessionContext: sessionContext)
+        }
 
         let (data, _) = try await requestData(request, stage: "请求 Innertube \(profile.name)")
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -350,12 +441,17 @@ final class VideoResolver {
                     throw DownloaderError.extractionFailed("\(stage) 没有返回 HTTP 响应。")
                 }
                 guard (200...299).contains(http.statusCode) else {
+                    let detail = Self.responseDetail(data)
+                    let responseMIMEType = http.mimeType ?? "unknown"
+                    DiagnosticLogger.shared.warning(
+                        "\(stage) HTTP=\(http.statusCode); mime=\(responseMIMEType); body=\(detail)"
+                    )
                     if attempt < 3, [408, 425, 429, 500, 502, 503, 504].contains(http.statusCode) {
                         DiagnosticLogger.shared.warning("\(stage) HTTP=\(http.statusCode)，自动重试 \(attempt)/2")
                         try await Task.sleep(nanoseconds: UInt64(attempt) * 1_000_000_000)
                         continue
                     }
-                    throw DownloaderError.extractionFailed("\(stage) 返回 HTTP \(http.statusCode)。")
+                    throw DownloaderError.extractionFailed("\(stage) 返回 HTTP \(http.statusCode)：\(detail)")
                 }
                 return (data, http)
             } catch let error as URLError {
@@ -440,19 +536,43 @@ final class VideoResolver {
         if !cookie.isEmpty { request.setValue(cookie, forHTTPHeaderField: "Cookie") }
     }
 
-    private func applyCookieAuthorization(to request: inout URLRequest, cookie: String) {
+    private func applyCookieAuthorization(
+        to request: inout URLRequest,
+        cookie: String,
+        sessionContext: SessionContext
+    ) {
         guard !cookie.isEmpty else { return }
         let values = Self.cookieValues(cookie)
-        guard let sapisid = values["SAPISID"]
-                ?? values["__Secure-3PAPISID"]
-                ?? values["__Secure-1PAPISID"] else { return }
+        let primarySID = values["SAPISID"] ?? values["__Secure-3PAPISID"]
+        let sidValues: [(String, String?)] = [
+            ("SAPISIDHASH", primarySID),
+            ("SAPISID1PHASH", values["__Secure-1PAPISID"]),
+            ("SAPISID3PHASH", values["__Secure-3PAPISID"])
+        ]
         let timestamp = Int(Date().timeIntervalSince1970)
-        let input = "\(timestamp) \(sapisid) https://www.youtube.com"
-        let digest = Insecure.SHA1.hash(data: Data(input.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
-        request.setValue("SAPISIDHASH \(timestamp)_\(digest)", forHTTPHeaderField: "Authorization")
-        request.setValue("0", forHTTPHeaderField: "X-Goog-AuthUser")
+        let authorizations = sidValues.compactMap { scheme, sid -> String? in
+            guard let sid, !sid.isEmpty else { return nil }
+            let prefix = sessionContext.userSessionID.map { "\($0) " } ?? ""
+            let input = "\(prefix)\(timestamp) \(sid) https://www.youtube.com"
+            let digest = Insecure.SHA1.hash(data: Data(input.utf8))
+                .map { String(format: "%02x", $0) }
+                .joined()
+            let suffix = sessionContext.userSessionID.map { "_u\($0)" } ?? ""
+            return "\(scheme) \(timestamp)_\(digest)\(suffix)"
+        }
+        if !authorizations.isEmpty {
+            request.setValue(authorizations.joined(separator: " "), forHTTPHeaderField: "Authorization")
+            request.setValue("https://www.youtube.com", forHTTPHeaderField: "X-Origin")
+        }
+        if let delegatedSessionID = sessionContext.delegatedSessionID {
+            request.setValue(delegatedSessionID, forHTTPHeaderField: "X-Goog-PageId")
+        }
+        if sessionContext.delegatedSessionID != nil || sessionContext.sessionIndex != nil {
+            request.setValue(sessionContext.sessionIndex ?? "0", forHTTPHeaderField: "X-Goog-AuthUser")
+        }
+        if sessionContext.loggedIn {
+            request.setValue("true", forHTTPHeaderField: "X-Youtube-Bootstrap-Logged-In")
+        }
     }
 
     private static func mediaURL(from format: [String: Any]) -> URL? {
@@ -490,6 +610,50 @@ final class VideoResolver {
     private static func decodeJSONString(_ value: String) -> String? {
         let wrapped = "\"\(value)\""
         return try? JSONDecoder().decode(String.self, from: Data(wrapped.utf8))
+    }
+
+    private static func sessionContext(from html: String) -> SessionContext {
+        let sessionIndex = capture(#""SESSION_INDEX":"([0-9]+)""#, in: html)
+            ?? capture(#""SESSION_INDEX":([0-9]+)"#, in: html)
+        let explicitDelegatedID = capture(#""DELEGATED_SESSION_ID":"([^"]+)""#, in: html)
+            .flatMap(decodeJSONString)
+        let dataSyncID = capture(#""DATASYNC_ID":"([^"]+)""#, in: html)
+            .flatMap(decodeJSONString)
+        var delegatedID = explicitDelegatedID
+        var userSessionID: String?
+        if let dataSyncID {
+            let parts = dataSyncID.components(separatedBy: "||")
+            if parts.count > 1, !parts[1].isEmpty {
+                if delegatedID == nil, !parts[0].isEmpty { delegatedID = parts[0] }
+                userSessionID = parts[1]
+            } else if !parts[0].isEmpty {
+                userSessionID = parts[0]
+            }
+        }
+        let loggedIn = html.range(of: #""LOGGED_IN":true"#) != nil
+        return SessionContext(
+            sessionIndex: sessionIndex,
+            delegatedSessionID: delegatedID,
+            userSessionID: userSessionID,
+            loggedIn: loggedIn
+        )
+    }
+
+    private static func responseDetail(_ data: Data) -> String {
+        if let decoded = try? JSONSerialization.jsonObject(with: data),
+           let object = decoded as? [String: Any],
+           let error = object["error"] as? [String: Any] {
+            let status = error["status"] as? String
+            let message = error["message"] as? String
+            let joined = [status, message].compactMap { $0 }.joined(separator: ": ")
+            if !joined.isEmpty { return String(joined.prefix(300)) }
+        }
+        let text = String(data: data.prefix(600), encoding: .utf8) ?? "non-text response"
+        return String(
+            text.replacingOccurrences(of: "\r", with: " ")
+                .replacingOccurrences(of: "\n", with: " ")
+                .prefix(300)
+        )
     }
 
     private static func cookieValues(_ cookie: String) -> [String: String] {

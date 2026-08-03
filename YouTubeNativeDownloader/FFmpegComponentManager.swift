@@ -52,7 +52,7 @@ final class ComponentDownloadTransfer: NSObject, URLSessionDownloadDelegate, @un
             var request = URLRequest(url: url)
             request.timeoutInterval = 60
             request.cachePolicy = .reloadIgnoringLocalCacheData
-            request.setValue("YouTubeNativeDownloader/4.0", forHTTPHeaderField: "User-Agent")
+            request.setValue("YouTubeNativeDownloader/4.1", forHTTPHeaderField: "User-Agent")
             session.downloadTask(with: request).resume()
         }
     }
