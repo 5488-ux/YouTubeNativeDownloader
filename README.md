@@ -1,8 +1,8 @@
 # 本地下载器 iOS
 
-原生 SwiftUI YouTube 下载器，支持 iOS 16.1 及以上版本（含 iOS 26）。4.5 已把原服务器的 PO Token 与播放器挑战能力完整放进 IPA：App 不再调用自建解析、授权或媒体中转接口。
+原生 SwiftUI YouTube 下载器，支持 iOS 16.1 及以上版本（含 iOS 26）。4.6 已修复本机 WebKit 参数冲突，并加入由 iPhone 直连 YouTube 的 Cookie 登录状态测试。App 不调用自建解析、授权或媒体中转接口。
 
-## 4.5 功能
+## 4.6 功能
 
 - 支持普通 YouTube、`youtu.be`、Shorts、Embed 和 Live 链接。
 - 支持最佳画质、1080P、720P、480P，优先选择 iPhone 兼容的 H.264 视频与 AAC 音频。
@@ -12,7 +12,7 @@
 - WEB/MWEB Player 通过隐藏 WebKit 网络栈请求，手动 Cookie、浏览器指纹、BotGuard 与 Token 保持在同一手机会话。
 - IPA 内置 yt-dlp EJS，本机读取当前播放器脚本并解开 `n` 与 `signatureCipher` 播放器挑战。
 - 不调用 `youtube.789113.cn/ios-api/resolve`、`/ios-api/media-access` 或 `/ios-api/pot`。
-- 设置中可以粘贴 Cookie 请求头、Netscape `cookies.txt` 或常见 JSON Cookie 导出。
+- 设置中可以粘贴 Cookie 请求头、Netscape `cookies.txt` 或常见 JSON Cookie 导出，并可点击“测试 Cookie”确认 YouTube 是否识别登录状态。
 - Cookie 只保存在 iOS 钥匙串，不上传、不写入诊断日志。
 - Cookie 鉴权根据客户端能力分流，并支持 SAPISID 哈希及多账号/品牌频道会话头。
 - iPhone 直接从 YouTube/Google 媒体地址下载，不经过自建服务器。
@@ -41,7 +41,7 @@
 1. 在自己的浏览器登录 YouTube。
 2. 使用 Cookie 导出工具复制 `youtube.com` Cookie。
 3. 打开 App 的“设置 → YouTube Cookie”。
-4. 粘贴并保存，然后重新下载。
+4. 粘贴后点击“测试 Cookie”；确认登录状态有效后保存，再重新下载。
 
 Cookie 等同账号登录凭证，不要发送给任何人。Cookie 失效后需要重新导出。
 

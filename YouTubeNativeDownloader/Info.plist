@@ -17,9 +17,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>4.5</string>
+    <string>4.6</string>
     <key>CFBundleVersion</key>
-    <string>24</string>
+    <string>25</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>用于在 MP4 合并完成后自动保存视频到你的照片图库。</string>
     <key>CFBundleURLTypes</key>

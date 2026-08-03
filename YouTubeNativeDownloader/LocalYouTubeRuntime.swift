@@ -7,6 +7,14 @@ struct LocalMediaAccess: Sendable {
     let solvedSignatures: [String: String]
 }
 
+struct LocalCookieTestResult: Sendable {
+    let httpStatus: Int
+    let loggedIn: Bool
+    let hasDataSyncID: Bool
+    let hasVisitorData: Bool
+    let cookieCount: Int
+}
+
 @MainActor
 final class LocalYouTubeRuntime: NSObject, WKNavigationDelegate {
     static let shared = LocalYouTubeRuntime()
@@ -42,11 +50,6 @@ final class LocalYouTubeRuntime: NSObject, WKNavigationDelegate {
         )
 
         let script = """
-        const contentBinding = arguments.contentBinding;
-        const playerURL = arguments.playerURL;
-        const nChallenges = arguments.nChallenges;
-        const signatureChallenges = arguments.signatureChallenges;
-
         if (!globalThis.LocalYouTubePO || !globalThis.YTDLPEJS?.default) {
             throw new Error('本机 YouTube 组件尚未加载');
         }
@@ -139,10 +142,10 @@ final class LocalYouTubeRuntime: NSObject, WKNavigationDelegate {
         }
 
         let script = """
-        const response = await fetch(arguments.endpoint, {
+        const response = await fetch(endpoint, {
             method: 'POST',
-            headers: arguments.headers,
-            body: arguments.body,
+            headers: headers,
+            body: body,
             credentials: 'include',
             cache: 'no-store'
         });
@@ -173,6 +176,74 @@ final class LocalYouTubeRuntime: NSObject, WKNavigationDelegate {
             return data
         } catch {
             DiagnosticLogger.shared.error(error, stage: "WebKit 请求 Innertube Player")
+            throw error
+        }
+    }
+
+    func testCookie(_ cookieHeader: String) async throws -> LocalCookieTestResult {
+        let normalizedHeader = YouTubeCookieStore.normalizedCookieHeader(cookieHeader)
+        guard !normalizedHeader.isEmpty else {
+            throw Self.runtimeError("Cookie 内容为空")
+        }
+
+        try await prepareIfNeeded()
+        guard let webView else {
+            throw Self.runtimeError("本机 YouTube 运行环境没有启动")
+        }
+        try await installCookies(normalizedHeader, in: webView.configuration.websiteDataStore.httpCookieStore)
+
+        let script = """
+        const response = await fetch(testURL, {
+            method: 'GET',
+            credentials: 'include',
+            cache: 'no-store',
+            headers: { 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.7' }
+        });
+        const text = await response.text();
+        const loggedIn = /["']LOGGED_IN["']\\s*:\\s*true/.test(text) ||
+            /["']isLoggedIn["']\\s*:\\s*true/.test(text);
+        const hasDataSyncID = /["']DATASYNC_ID["']\\s*:\\s*["'][^"']+/.test(text);
+        const hasVisitorData = /["']VISITOR_DATA["']\\s*:\\s*["'][^"']+/.test(text);
+        return {
+            status: response.status,
+            logged_in: loggedIn,
+            has_data_sync_id: hasDataSyncID,
+            has_visitor_data: hasVisitorData
+        };
+        """
+
+        do {
+            let value = try await webView.callAsyncJavaScript(
+                script,
+                arguments: ["testURL": "https://www.youtube.com/feed/you?hl=zh-CN"],
+                in: nil,
+                contentWorld: .page
+            )
+            guard let result = value as? [String: Any],
+                  let status = (result["status"] as? NSNumber)?.intValue,
+                  let loggedIn = (result["logged_in"] as? NSNumber)?.boolValue,
+                  let hasDataSyncID = (result["has_data_sync_id"] as? NSNumber)?.boolValue,
+                  let hasVisitorData = (result["has_visitor_data"] as? NSNumber)?.boolValue else {
+                throw Self.runtimeError("Cookie 测试返回格式错误")
+            }
+            guard (200...299).contains(status) else {
+                throw Self.runtimeError("YouTube Cookie 测试返回 HTTP \(status)")
+            }
+
+            let cookieCount = Self.cookies(from: normalizedHeader).count
+            DiagnosticLogger.shared.info(
+                "Cookie 本机测试完成; HTTP=\(status); count=\(cookieCount); loggedIn=\(loggedIn); " +
+                "dataSync=\(hasDataSyncID); visitorData=\(hasVisitorData)"
+            )
+            return LocalCookieTestResult(
+                httpStatus: status,
+                loggedIn: loggedIn,
+                hasDataSyncID: hasDataSyncID,
+                hasVisitorData: hasVisitorData,
+                cookieCount: cookieCount
+            )
+        } catch {
+            DiagnosticLogger.shared.error(error, stage: "本机测试 YouTube Cookie")
             throw error
         }
     }

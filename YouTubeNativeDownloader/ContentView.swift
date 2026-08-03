@@ -660,8 +660,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "4.5"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "24"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "4.6"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "25"
         return "\(version) (\(build))"
     }
 }
@@ -672,6 +672,7 @@ private struct CookieSettingsView: View {
     @State private var cookieText = ""
     @State private var message: String?
     @State private var showingMessage = false
+    @State private var isTestingCookie = false
 
     var body: some View {
         Form {
@@ -702,6 +703,19 @@ private struct CookieSettingsView: View {
                 }
                 .disabled(cookieText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
+                Button {
+                    testCookie()
+                } label: {
+                    HStack(spacing: 10) {
+                        if isTestingCookie {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(isTestingCookie ? "正在测试 Cookie…" : "测试 Cookie")
+                    }
+                }
+                .disabled(isTestingCookie || cookieText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
                 if YouTubeCookieStore.hasCookie {
                     Button("删除 Cookie", role: .destructive) {
                         YouTubeCookieStore.delete()
@@ -730,6 +744,31 @@ private struct CookieSettingsView: View {
             Text(message ?? "操作完成")
         }
     }
+
+    private func testCookie() {
+        let header = YouTubeCookieStore.normalizedCookieHeader(cookieText)
+        guard !header.isEmpty else {
+            message = "Cookie 内容为空"
+            showingMessage = true
+            return
+        }
+
+        isTestingCookie = true
+        Task { @MainActor in
+            defer { isTestingCookie = false }
+            do {
+                let result = try await LocalYouTubeRuntime.shared.testCookie(header)
+                if result.loggedIn {
+                    message = "Cookie 有效：YouTube 已识别登录状态。共读取 \(result.cookieCount) 项 Cookie；Data Sync \(result.hasDataSyncID ? "正常" : "未返回")；Visitor Data \(result.hasVisitorData ? "正常" : "未返回")。"
+                } else {
+                    message = "Cookie 无效、不完整或已过期：YouTube 返回 HTTP \(result.httpStatus)，但没有识别登录状态。请重新导出完整的 youtube.com Cookie。"
+                }
+            } catch {
+                message = "Cookie 测试失败：\(error.localizedDescription)"
+            }
+            showingMessage = true
+        }
+    }
 }
 
 private struct ReleaseNote: Identifiable {
@@ -740,6 +779,16 @@ private struct ReleaseNote: Identifiable {
     var id: String { version }
 
     static let all: [ReleaseNote] = [
+        ReleaseNote(
+            version: "4.6",
+            title: "修复本机运行时与 Cookie 自检",
+            changes: [
+                "修复 WebKit 异步 JavaScript 参数被重复声明导致 PO Token 阶段直接崩溃的问题。",
+                "修复隐藏 WebKit 请求 Innertube 时错误读取 arguments 参数的问题。",
+                "设置新增“测试 Cookie”，由 iPhone 直接访问 YouTube 并检查登录状态、Data Sync 与 Visitor Data。",
+                "Cookie 测试只记录状态和数量，不记录或上传任何 Cookie 内容。"
+            ]
+        ),
         ReleaseNote(
             version: "4.5",
             title: "PO Token 提前解锁 Player",
