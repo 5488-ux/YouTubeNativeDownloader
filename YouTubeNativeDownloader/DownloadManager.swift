@@ -170,6 +170,43 @@ final class DownloadTransfer: NSObject, URLSessionDownloadDelegate, @unchecked S
 }
 
 enum MediaFileBuilder {
+    static func exportHLSVideo(
+        source: MediaSource,
+        title: String,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> URL {
+        DiagnosticLogger.shared.info(
+            "准备 AVFoundation HLS 导出; host=\(source.url.host ?? "unknown"); " +
+            "resolution=\(source.width ?? 0)x\(source.height ?? 0)"
+        )
+        let options: [String: Any] = [
+            AVURLAssetPreferPreciseDurationAndTimingKey: true,
+            "AVURLAssetHTTPHeaderFieldsKey": source.httpHeaders
+        ]
+        let asset = AVURLAsset(url: source.url, options: options)
+        let playable = try await asset.load(.isPlayable)
+        let duration = try await asset.load(.duration)
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        guard playable, duration.isNumeric, !videoTracks.isEmpty, !audioTracks.isEmpty else {
+            throw DownloaderError.mergeFailed("HLS 清单缺少可导出的视频轨或音频轨")
+        }
+
+        guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else {
+            throw DownloaderError.mergeFailed("无法创建 HLS 导出任务")
+        }
+        let output = uniqueDocumentURL(title: title, extension: "mp4")
+        exporter.outputURL = output
+        exporter.outputFileType = .mp4
+        exporter.shouldOptimizeForNetworkUse = true
+        try await export(exporter, progress: progress)
+        try await validateOutput(output, expectedDuration: duration)
+        DiagnosticLogger.shared.info(
+            "HLS 本机导出完成; output=\(output.lastPathComponent); bytes=\((try? output.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)"
+        )
+        return output
+    }
+
     static func mergeToMOV(
         videoURL: URL,
         audioURL: URL,

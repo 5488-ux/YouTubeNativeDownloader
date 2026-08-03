@@ -660,8 +660,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "4.1"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "20"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "4.2"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "21"
         return "\(version) (\(build))"
     }
 }
@@ -740,6 +740,16 @@ private struct ReleaseNote: Identifiable {
     var id: String { version }
 
     static let all: [ReleaseNote] = [
+        ReleaseNote(
+            version: "4.2",
+            title: "绕过媒体直链 403",
+            changes: [
+                "识别 MWEB 与 Safari 返回的免 PO Token HLS 清单。",
+                "按所选画质挑选 H.264 HLS 变体。",
+                "由 iPhone 使用 AVFoundation 下载并封装为 MP4，不再硬撞会返回 403 的 HTTPS 直链。",
+                "HLS 成品继续校验视频轨、音频轨和时长并自动保存照片。"
+            ]
+        ),
         ReleaseNote(
             version: "4.1",
             title: "修复 Cookie 客户端鉴权",

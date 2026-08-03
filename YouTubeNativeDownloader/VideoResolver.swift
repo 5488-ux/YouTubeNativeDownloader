@@ -17,6 +17,7 @@ struct ResolvedMedia: Sendable {
     let title: String
     let videoID: String
     let video: MediaSource?
+    let hlsVideo: MediaSource?
     let audio: MediaSource
 }
 
@@ -251,6 +252,14 @@ final class VideoResolver {
                 embedURL: nil
             ),
             ClientProfile(
+                name: "WEB",
+                numericName: "1",
+                version: webVersion,
+                userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)",
+                supportsCookies: true,
+                embedURL: nil
+            ),
+            ClientProfile(
                 name: "WEB_EMBEDDED_PLAYER",
                 numericName: "56",
                 version: webVersion,
@@ -314,20 +323,31 @@ final class VideoResolver {
                 let candidates = formats.compactMap {
                     makeCandidate($0, cookie: cookie, userAgent: profile.userAgent, watchURL: watchURL)
                 }
+                let hlsVideo = kind == .video
+                    ? try await makeHLSSource(
+                        streaming: streaming,
+                        quality: quality,
+                        cookie: cookie,
+                        userAgent: profile.userAgent,
+                        watchURL: watchURL
+                    )
+                    : nil
                 sawCipheredFormats = sawCipheredFormats || formats.contains { format in
                     format["signatureCipher"] != nil || format["cipher"] != nil
                 }
 
                 let audio = selectAudio(from: candidates)
                 let video = selectVideo(from: candidates, quality: quality)
-                if let audio, kind == .audio || video != nil {
+                if let audio, kind == .audio || video != nil || hlsVideo != nil {
                     DiagnosticLogger.shared.info(
-                        "本机解析成功; client=\(profile.name) \(profile.version); formats=\(formats.count); direct=\(candidates.count)"
+                        "本机解析成功; client=\(profile.name) \(profile.version); formats=\(formats.count); " +
+                        "direct=\(candidates.count); hls=\(hlsVideo != nil)"
                     )
                     return ResolvedMedia(
                         title: title,
                         videoID: videoID,
                         video: kind == .video ? video : nil,
+                        hlsVideo: hlsVideo,
                         audio: audio
                     )
                 }
@@ -499,6 +519,76 @@ final class VideoResolver {
                 bitrate: Self.int(format["bitrate"])
             ),
             mimeType: mimeType
+        )
+    }
+
+    private func makeHLSSource(
+        streaming: [String: Any]?,
+        quality: VideoQuality,
+        cookie: String,
+        userAgent: String,
+        watchURL: URL
+    ) async throws -> MediaSource? {
+        guard let value = streaming?["hlsManifestUrl"] as? String,
+              let masterURL = URL(string: value) else { return nil }
+        let headers: [String: String] = [
+            "User-Agent": userAgent,
+            "Referer": watchURL.absoluteString,
+            "Origin": "https://www.youtube.com",
+            "Cookie": cookie
+        ].filter { !$0.value.isEmpty }
+        var request = URLRequest(url: masterURL)
+        request.timeoutInterval = 30
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+        let (data, _) = try await requestData(request, stage: "读取 HLS 清单")
+        guard let playlist = String(data: data, encoding: .utf8) else { return nil }
+
+        struct Variant {
+            let url: URL
+            let width: Int?
+            let height: Int?
+            let bandwidth: Int
+        }
+        let lines = playlist.components(separatedBy: .newlines)
+        var variants: [Variant] = []
+        for index in lines.indices {
+            let line = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard line.hasPrefix("#EXT-X-STREAM-INF:"), index + 1 < lines.count else { continue }
+            let attributes = String(line.dropFirst("#EXT-X-STREAM-INF:".count))
+            guard attributes.range(of: "avc1", options: .caseInsensitive) != nil else { continue }
+            let next = lines[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !next.isEmpty, !next.hasPrefix("#"), let url = URL(string: next, relativeTo: masterURL)?.absoluteURL else { continue }
+            let resolution = Self.capture(#"RESOLUTION=([0-9]+x[0-9]+)"#, in: attributes)?
+                .split(separator: "x")
+                .compactMap { Int($0) }
+            let bandwidth = Self.capture(#"BANDWIDTH=([0-9]+)"#, in: attributes).flatMap(Int.init) ?? 0
+            variants.append(Variant(
+                url: url,
+                width: resolution?.count == 2 ? resolution?[0] : nil,
+                height: resolution?.count == 2 ? resolution?[1] : nil,
+                bandwidth: bandwidth
+            ))
+        }
+        let allowed = variants.filter { variant in
+            guard let limit = quality.maximumHeight else { return true }
+            return (variant.height ?? 0) <= limit
+        }
+        guard let selected = allowed.max(by: { left, right in
+            if (left.height ?? 0) != (right.height ?? 0) { return (left.height ?? 0) < (right.height ?? 0) }
+            return left.bandwidth < right.bandwidth
+        }) ?? variants.max(by: { $0.bandwidth < $1.bandwidth }) else { return nil }
+        DiagnosticLogger.shared.info(
+            "选择 HLS 变体; resolution=\(selected.width ?? 0)x\(selected.height ?? 0); bandwidth=\(selected.bandwidth)"
+        )
+        return MediaSource(
+            url: selected.url,
+            httpHeaders: headers,
+            contentLength: nil,
+            codec: "avc1+hls",
+            width: selected.width,
+            height: selected.height,
+            fps: nil,
+            bitrate: selected.bandwidth
         )
     }
 
