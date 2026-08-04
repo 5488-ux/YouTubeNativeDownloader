@@ -2,6 +2,7 @@ import Foundation
 
 enum DownloaderError: LocalizedError {
     case invalidURL
+    case invalidServerURL
     case noCompatibleVideo
     case noCompatibleAudio
     case badHTTPStatus(Int)
@@ -18,10 +19,12 @@ enum DownloaderError: LocalizedError {
         switch self {
         case .invalidURL:
             return "链接无效，请粘贴 YouTube 视频或 Shorts 链接。"
+        case .invalidServerURL:
+            return "解析接口地址无效，请在设置中恢复默认接口。"
         case .noCompatibleVideo:
-            return "本机解析没有找到 iPhone 可播放的 H.264 视频。"
+            return "解析服务器没有找到 iPhone 可播放的 H.264 视频。"
         case .noCompatibleAudio:
-            return "本机解析没有找到 AAC 音频。"
+            return "解析服务器没有找到 AAC 音频。"
         case .badHTTPStatus(let code):
             return "下载返回 HTTP \(code)，临时链接可能已过期，请重新开始。"
         case .downloadFailed:

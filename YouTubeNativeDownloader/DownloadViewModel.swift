@@ -13,7 +13,6 @@ enum DownloadTaskPhase: Equatable {
     case completed
     case failed
 }
-
 @MainActor
 final class DownloadViewModel: ObservableObject {
     @Published var urlText = ""
@@ -35,6 +34,9 @@ final class DownloadViewModel: ObservableObject {
     @Published private(set) var savedFiles: [URL] = []
     @Published private(set) var activePhase: DownloadTaskPhase = .idle
 
+    @Published var serverURL: String {
+        didSet { UserDefaults.standard.set(serverURL, forKey: Keys.serverURL) }
+    }
     @Published var allowsCellular: Bool {
         didSet { UserDefaults.standard.set(allowsCellular, forKey: Keys.allowsCellular) }
     }
@@ -54,6 +56,8 @@ final class DownloadViewModel: ObservableObject {
 
     init() {
         let defaults = UserDefaults.standard
+        serverURL = defaults.string(forKey: Keys.serverURL)
+            ?? "https://youtube.789113.cn/ios-api/resolve"
         allowsCellular = defaults.object(forKey: Keys.allowsCellular) as? Bool ?? true
         notificationsEnabled = defaults.object(forKey: Keys.notificationsEnabled) as? Bool ?? true
         liveActivityEnabled = defaults.object(forKey: Keys.liveActivityEnabled) as? Bool ?? true
@@ -63,6 +67,19 @@ final class DownloadViewModel: ObservableObject {
 
     func start() {
         guard !isBusy else { return }
+        if kind == .video && !FFmpegComponentManager.shared.isInstalled {
+            alertTitle = "需要合并组件"
+            errorText = DownloaderError.componentMissing.localizedDescription
+            return
+        }
+        let trimmedServer = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let endpoint = URL(string: trimmedServer),
+              let scheme = endpoint.scheme?.lowercased(),
+              ["https", "http"].contains(scheme) else {
+            errorText = DownloaderError.invalidServerURL.localizedDescription
+            return
+        }
+
         errorText = nil
         alertTitle = "下载失败"
         latestFile = nil
@@ -75,22 +92,24 @@ final class DownloadViewModel: ObservableObject {
         speedText = "--"
         etaText = "--"
         transferredText = "--"
-        statusText = "iPhone 正在本机解析"
+        statusText = "服务器正在解析格式"
         activePhase = .resolving
         startResolverProgress()
         DiagnosticLogger.shared.beginSession(
             urlText: urlText,
+            endpoint: endpoint,
             kind: kind,
             quality: quality
         )
-        DiagnosticLogger.shared.info("开始本机解析，不使用解析服务器")
+        DiagnosticLogger.shared.info("开始请求解析服务器")
 
         Task {
             do {
                 let media = try await resolver.resolve(
                     urlText: urlText,
                     quality: quality,
-                    kind: kind
+                    kind: kind,
+                    endpoint: endpoint
                 )
                 stopResolverProgress(completed: true)
                 DiagnosticLogger.shared.info("解析成功; videoID=\(media.videoID); title=\(media.title)")
@@ -103,108 +122,72 @@ final class DownloadViewModel: ObservableObject {
                 let output: URL
                 switch kind {
                 case .video:
-                    if let hlsVideo = media.hlsVideo {
-                        statusText = resolutionText(hlsVideo) + " · HLS 下载与封装"
-                        activePhase = .downloadingVideo
-                        progress = 0.02
-                        videoProgress = 0
-                        speedText = "HLS 本机处理"
-                        etaText = "准备中"
-                        DiagnosticLogger.shared.info("优先使用免 PO Token 的 HLS; \(sourceDescription(hlsVideo))")
-                        let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "HLS MP4 export")
-                        defer {
-                            if backgroundTask != .invalid {
-                                UIApplication.shared.endBackgroundTask(backgroundTask)
-                            }
-                        }
-                        output = try await MediaFileBuilder.exportHLSVideo(
-                            source: hlsVideo,
-                            title: media.title
-                        ) { [weak self] hlsProgress in
-                            Task { @MainActor in
-                                guard let self else { return }
-                                let percent = Int(hlsProgress * 100)
-                                self.progress = 0.02 + hlsProgress * 0.96
-                                self.videoProgress = hlsProgress
-                                self.statusText = "HLS 下载与封装 MP4 · \(percent)%"
-                                self.speedText = "HLS 本机处理"
-                                self.etaText = "\(percent)%"
-                                self.updateActivity(force: false)
-                            }
-                        }
-                        videoProgress = 1
-                        DiagnosticLogger.shared.info("HLS MP4 完成; file=\(output.lastPathComponent); bytes=\(fileBytes(output))")
-                    } else {
-                        guard FFmpegComponentManager.shared.isInstalled else {
-                            throw DownloaderError.componentMissing
-                        }
-                        guard let video = media.video else { throw DownloaderError.noCompatibleVideo }
-                        let videoLength = max(0, video.contentLength ?? 0)
-                        let audioLength = max(0, media.audio.contentLength ?? 0)
-                        let knownTotal = videoLength + audioLength
-                        let videoWeight = knownTotal > 0 ? Double(videoLength) / Double(knownTotal) * 0.90 : 0.75
-                        let audioWeight = 0.90 - videoWeight
+                    guard let video = media.video else { throw DownloaderError.noCompatibleVideo }
+                    let videoLength = max(0, video.contentLength ?? 0)
+                    let audioLength = max(0, media.audio.contentLength ?? 0)
+                    let knownTotal = videoLength + audioLength
+                    let videoWeight = knownTotal > 0 ? Double(videoLength) / Double(knownTotal) * 0.90 : 0.75
+                    let audioWeight = 0.90 - videoWeight
 
-                        statusText = resolutionText(video) + " · 下载视频"
-                        activePhase = .downloadingVideo
-                        DiagnosticLogger.shared.info("开始下载视频; \(sourceDescription(video))")
-                        let videoFile = try await downloadDirect(
-                            source: video
-                        ) { [weak self] value in
-                            Task { @MainActor in
-                                self?.applyProgress(value, offset: 0, weight: videoWeight, phase: "下载视频")
-                            }
+                    statusText = resolutionText(video) + " · 下载视频"
+                    activePhase = .downloadingVideo
+                    DiagnosticLogger.shared.info("开始下载视频; \(sourceDescription(video))")
+                    let videoFile = try await downloadDirect(
+                        source: video
+                    ) { [weak self] value in
+                        Task { @MainActor in
+                            self?.applyProgress(value, offset: 0, weight: videoWeight, phase: "下载视频")
                         }
-                        videoProgress = 1
-
-                        statusText = "下载 AAC 音频"
-                        activePhase = .downloadingAudio
-                        DiagnosticLogger.shared.info("开始下载音频; \(sourceDescription(media.audio))")
-                        let audioFile = try await downloadDirect(
-                            source: media.audio
-                        ) { [weak self] value in
-                            Task { @MainActor in
-                                self?.applyProgress(value, offset: videoWeight, weight: audioWeight, phase: "下载音频")
-                            }
-                        }
-                        audioProgress = 1
-
-                        statusText = "FFmpeg 正在合并 MP4"
-                        activePhase = .converting
-                        DiagnosticLogger.shared.info("音视频下载完成，开始本机 FFmpeg WASM 合并")
-                        progress = 0.90
-                        conversionProgress = 0
-                        speedText = "本机合并"
-                        etaText = "合并 0%"
-                        updateActivity(force: true)
-
-                        let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "FFmpeg MP4 merge")
-                        defer {
-                            if backgroundTask != .invalid {
-                                UIApplication.shared.endBackgroundTask(backgroundTask)
-                            }
-                        }
-                        output = try await FFmpegWasmRunner.mergeToMP4(
-                            videoURL: videoFile,
-                            audioURL: audioFile,
-                            title: media.title
-                        ) { [weak self] conversionProgress in
-                            Task { @MainActor in
-                                guard let self else { return }
-                                let percent = Int(conversionProgress * 100)
-                                self.progress = 0.90 + conversionProgress * 0.09
-                                self.conversionProgress = conversionProgress
-                                self.statusText = "FFmpeg 正在合并 MP4 · \(percent)%"
-                                self.speedText = "本机合并"
-                                self.etaText = "合并 \(percent)%"
-                                self.updateActivity(force: false)
-                            }
-                        }
-                        try? FileManager.default.removeItem(at: videoFile)
-                        try? FileManager.default.removeItem(at: audioFile)
-                        conversionProgress = 1
-                        DiagnosticLogger.shared.info("FFmpeg MP4 合并完成; file=\(output.lastPathComponent); bytes=\(fileBytes(output))")
                     }
+                    videoProgress = 1
+
+                    statusText = "下载 AAC 音频"
+                    activePhase = .downloadingAudio
+                    DiagnosticLogger.shared.info("开始下载音频; \(sourceDescription(media.audio))")
+                    let audioFile = try await downloadDirect(
+                        source: media.audio
+                    ) { [weak self] value in
+                        Task { @MainActor in
+                            self?.applyProgress(value, offset: videoWeight, weight: audioWeight, phase: "下载音频")
+                        }
+                    }
+                    audioProgress = 1
+
+                    statusText = "FFmpeg 正在合并 MP4"
+                    activePhase = .converting
+                    DiagnosticLogger.shared.info("音视频下载完成，开始本机 FFmpeg WASM 合并")
+                    progress = 0.90
+                    conversionProgress = 0
+                    speedText = "本机合并"
+                    etaText = "合并 0%"
+                    updateActivity(force: true)
+
+                    let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "FFmpeg MP4 merge")
+                    defer {
+                        if backgroundTask != .invalid {
+                            UIApplication.shared.endBackgroundTask(backgroundTask)
+                        }
+                    }
+                    output = try await FFmpegWasmRunner.mergeToMP4(
+                        videoURL: videoFile,
+                        audioURL: audioFile,
+                        title: media.title
+                    ) { [weak self] conversionProgress in
+                        Task { @MainActor in
+                            guard let self else { return }
+                            let percent = Int(conversionProgress * 100)
+                            self.progress = 0.90 + conversionProgress * 0.09
+                            self.conversionProgress = conversionProgress
+                            self.statusText = "FFmpeg 正在合并 MP4 · \(percent)%"
+                            self.speedText = "本机合并"
+                            self.etaText = "合并 \(percent)%"
+                            self.updateActivity(force: false)
+                        }
+                    }
+                    try? FileManager.default.removeItem(at: videoFile)
+                    try? FileManager.default.removeItem(at: audioFile)
+                    conversionProgress = 1
+                    DiagnosticLogger.shared.info("FFmpeg MP4 合并完成; file=\(output.lastPathComponent); bytes=\(fileBytes(output))")
 
                 case .audio:
                     statusText = "下载 AAC 音频"
@@ -301,6 +284,10 @@ final class DownloadViewModel: ObservableObject {
         resolverProgressTask?.cancel()
         resolverProgressTask = nil
         if completed { resolveProgress = 1 }
+    }
+
+    func resetServerURL() {
+        serverURL = "https://youtube.789113.cn/ios-api/resolve"
     }
 
     func refreshFiles() {
@@ -443,6 +430,7 @@ final class DownloadViewModel: ObservableObject {
     }()
 
     private enum Keys {
+        static let serverURL = "settings.serverURL"
         static let allowsCellular = "settings.allowsCellular"
         static let notificationsEnabled = "settings.notificationsEnabled"
         static let liveActivityEnabled = "settings.liveActivityEnabled"
