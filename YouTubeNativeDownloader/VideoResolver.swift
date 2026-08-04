@@ -128,7 +128,7 @@ final class VideoResolver {
                 }
                 DiagnosticLogger.shared.info(
                     "解析响应; attempt=\(attempt); HTTP=\(http.statusCode); bytes=\(data.count); " +
-                    "mime=\(http.mimeType ?? \"unknown\")"
+                    "mime=\(http.mimeType ?? "unknown")"
                 )
 
                 if Self.isRetryableHTTPStatus(http.statusCode) {
