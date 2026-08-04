@@ -205,10 +205,10 @@ final class VideoResolver {
         if !cookie.isEmpty, !hasLoginCookie || !hasSIDCookie {
             DiagnosticLogger.shared.warning("Cookie 缺少 LOGIN_INFO 或 SAPISID 系列字段，可能不是完整的 YouTube 登录 Cookie")
         }
-        var watchRequest = URLRequest(url: watchURL)
-        watchRequest.timeoutInterval = 45
-        applyCommonHeaders(to: &watchRequest, cookie: cookie, userAgent: webUserAgent)
-        let (watchData, _) = try await requestData(watchRequest, stage: "读取 YouTube 页面")
+        let watchData = try await LocalYouTubeRuntime.shared.pageData(
+            url: watchURL,
+            cookieHeader: cookie
+        )
         guard let html = String(data: watchData, encoding: .utf8) else {
             throw DownloaderError.extractionFailed("YouTube 页面编码无法识别。")
         }
@@ -251,30 +251,40 @@ final class VideoResolver {
                 embedURL: nil
             )
         ]
+        let webPageProfile = ClientProfile(
+            name: "WEB",
+            numericName: "1",
+            version: webVersion,
+            userAgent: webUserAgent,
+            supportsCookies: true,
+            embedURL: nil
+        )
+        let webSafariProfile = ClientProfile(
+            name: "WEB",
+            numericName: "1",
+            version: "2.20260708.00.00",
+            userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)",
+            supportsCookies: true,
+            embedURL: nil
+        )
+        let tvDowngradedProfile = ClientProfile(
+            name: "TVHTML5",
+            numericName: "7",
+            version: "5.20260707",
+            userAgent: "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
+            supportsCookies: true,
+            embedURL: nil
+        )
         let authenticatedProfiles = [
-            ClientProfile(
-                name: "WEB",
-                numericName: "1",
-                version: webVersion,
-                userAgent: webUserAgent,
-                supportsCookies: true,
-                embedURL: nil
-            ),
-            ClientProfile(
-                name: "WEB",
-                numericName: "1",
-                version: webVersion,
-                userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)",
-                supportsCookies: true,
-                embedURL: nil
-            ),
+            tvDowngradedProfile,
+            webSafariProfile,
             ClientProfile(
                 name: "WEB_EMBEDDED_PLAYER",
                 numericName: "56",
-                version: webVersion,
+                version: "2.20260708.00.00",
                 userAgent: webUserAgent,
                 supportsCookies: true,
-                embedURL: "https://www.youtube.com/embed/\(videoID)"
+                embedURL: "https://www.reddit.com/"
             ),
             ClientProfile(
                 name: "MWEB",
@@ -292,57 +302,62 @@ final class VideoResolver {
                 supportsCookies: true,
                 embedURL: nil
             ),
-            ClientProfile(
-                name: "TVHTML5",
-                numericName: "7",
-                version: "5.20260707",
-                userAgent: "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
-                supportsCookies: true,
-                embedURL: nil
-            )
+            webPageProfile
         ]
-        let profiles = authenticatedProfiles.sorted {
-            ($0.name == "MWEB" ? 0 : 1) < ($1.name == "MWEB" ? 0 : 1)
-        } + anonymousProfiles
+        let profiles = authenticatedProfiles + anonymousProfiles
 
         guard let playerURL else {
             throw DownloaderError.extractionFailed("页面中没有 YouTube 播放器地址，无法启动本机挑战组件")
         }
-        let initialAccess = try await LocalYouTubeRuntime.shared.mediaAccess(
-            contentBinding: videoID,
+        let initialPlayerResponse = Self.initialPlayerResponse(from: html)
+        if initialPlayerResponse != nil {
+            DiagnosticLogger.shared.info("网页内置 Player 响应提取成功，优先使用浏览器同会话结果")
+        } else {
+            DiagnosticLogger.shared.warning("网页没有可识别的 Player 响应，回退 Innertube API")
+        }
+        let signatureTimestamp = await resolveSignatureTimestamp(
+            html: html,
             playerURL: playerURL,
-            nChallenges: [],
-            signatureChallenges: [],
-            cookieHeader: cookie
+            cookie: cookie
         )
 
         var lastReason = "YouTube 没有返回播放格式"
         var sawCipheredFormats = false
         let gvsContentBinding = cookie.isEmpty
             ? visitorData
-            : (sessionContext.delegatedSessionID ?? visitorData)
+            : (sessionContext.userSessionID ?? visitorData)
         if gvsContentBinding == nil {
             DiagnosticLogger.shared.warning("页面缺少 GVS Token 会话绑定，媒体请求可能被 YouTube 拒绝")
         }
-        var mediaAccess: MediaAccess? = MediaAccess(
-            poToken: initialAccess.poToken,
-            solvedN: [:],
-            solvedSignatures: [:]
-        )
+        var mediaAccess: MediaAccess?
+        var attempts: [(profile: ClientProfile, response: [String: Any]?)] = []
+        if let initialPlayerResponse {
+            attempts.append((profile: webPageProfile, response: initialPlayerResponse))
+        }
         for profile in profiles {
+            attempts.append((profile: profile, response: nil))
+        }
+
+        for attempt in attempts {
+            let profile = attempt.profile
             do {
-                let response = try await playerResponse(
-                    videoID: videoID,
-                    apiKey: apiKey,
-                    visitorData: visitorData,
-                    cookie: cookie,
-                    sessionContext: sessionContext,
-                    profile: profile,
-                    poToken: initialAccess.poToken
-                )
+                let response: [String: Any]
+                if let embeddedResponse = attempt.response {
+                    response = embeddedResponse
+                } else {
+                    response = try await playerResponse(
+                        videoID: videoID,
+                        apiKey: apiKey,
+                        visitorData: visitorData,
+                        cookie: cookie,
+                        sessionContext: sessionContext,
+                        profile: profile,
+                        signatureTimestamp: signatureTimestamp
+                    )
+                }
                 let playability = response["playabilityStatus"] as? [String: Any]
                 let status = playability?["status"] as? String ?? "UNKNOWN"
-                let reason = playability?["reason"] as? String ?? status
+                let reason = Self.playabilityReason(playability) ?? status
                 guard status == "OK" else {
                     lastReason = reason
                     DiagnosticLogger.shared.warning("本机解析客户端不可用; client=\(profile.name) \(profile.version); status=\(status); reason=\(reason)")
@@ -366,7 +381,8 @@ final class VideoResolver {
                         contentBinding: gvsContentBinding,
                         playerURL: playerURL,
                         nChallenges: nChallenges,
-                        signatureChallenges: signatureChallenges
+                        signatureChallenges: signatureChallenges,
+                        cookieHeader: cookie
                     )
                 }
                 let accessForProfile = ["WEB", "MWEB", "WEB_EMBEDDED_PLAYER"].contains(profile.name)
@@ -437,7 +453,7 @@ final class VideoResolver {
         cookie: String,
         sessionContext: SessionContext,
         profile: ClientProfile,
-        poToken: String
+        signatureTimestamp: Int?
     ) async throws -> [String: Any] {
         var client: [String: Any] = [
             "clientName": profile.name,
@@ -471,19 +487,23 @@ final class VideoResolver {
         if let embedURL = profile.embedURL {
             context["thirdParty"] = ["embedUrl": embedURL]
         }
-        var body: [String: Any] = [
+        var contentPlaybackContext: [String: Any] = ["html5Preference": "HTML5_PREF_WANTS"]
+        if let signatureTimestamp {
+            contentPlaybackContext["signatureTimestamp"] = signatureTimestamp
+        }
+        let body: [String: Any] = [
             "context": context,
             "videoId": videoID,
             "contentCheckOk": true,
             "racyCheckOk": true,
             "playbackContext": [
-                "contentPlaybackContext": ["html5Preference": "HTML5_PREF_WANTS"]
+                "contentPlaybackContext": contentPlaybackContext
             ]
         ]
-        if ["WEB", "MWEB", "WEB_EMBEDDED_PLAYER"].contains(profile.name) {
-            body["serviceIntegrityDimensions"] = ["poToken": poToken]
-            DiagnosticLogger.shared.info("Innertube Player 请求携带本机 PO Token; client=\(profile.name); tokenBytes=\(poToken.utf8.count)")
-        }
+        let stsDescription = signatureTimestamp.map { String($0) } ?? "none"
+        DiagnosticLogger.shared.info(
+            "准备 Innertube Player 请求; client=\(profile.name); sts=\(stsDescription); playerPOT=false"
+        )
         let endpoint = URL(string: "https://www.youtube.com/youtubei/v1/player?key=\(apiKey)&prettyPrint=false")!
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -572,6 +592,35 @@ final class VideoResolver {
             }
         }
         throw lastError ?? DownloaderError.extractionFailed("\(stage) 未完成。")
+    }
+
+    private func resolveSignatureTimestamp(
+        html: String,
+        playerURL: URL,
+        cookie: String
+    ) async -> Int? {
+        if let value = Self.capture(#""STS":([0-9]{5})"#, in: html).flatMap(Int.init) {
+            DiagnosticLogger.shared.info("从网页配置提取播放器 STS; value=\(value)")
+            return value
+        }
+
+        var request = URLRequest(url: playerURL)
+        request.timeoutInterval = 45
+        applyCommonHeaders(to: &request, cookie: cookie, userAgent: webUserAgent)
+        do {
+            let (data, _) = try await requestData(request, stage: "读取播放器 STS")
+            guard let source = String(data: data, encoding: .utf8),
+                  let value = Self.capture(#"(?:signatureTimestamp|sts)\s*:\s*([0-9]{5})"#, in: source)
+                    .flatMap(Int.init) else {
+                DiagnosticLogger.shared.warning("播放器脚本没有可识别的 signatureTimestamp")
+                return nil
+            }
+            DiagnosticLogger.shared.info("从播放器脚本提取 STS; value=\(value)")
+            return value
+        } catch {
+            DiagnosticLogger.shared.error(error, stage: "提取播放器 signatureTimestamp")
+            return nil
+        }
     }
 
     private func makeCandidate(
@@ -791,13 +840,15 @@ final class VideoResolver {
         contentBinding: String,
         playerURL: URL,
         nChallenges: [String],
-        signatureChallenges: [String]
+        signatureChallenges: [String],
+        cookieHeader: String
     ) async throws -> MediaAccess {
         let access = try await LocalYouTubeRuntime.shared.mediaAccess(
             contentBinding: contentBinding,
             playerURL: playerURL,
             nChallenges: nChallenges,
-            signatureChallenges: signatureChallenges
+            signatureChallenges: signatureChallenges,
+            cookieHeader: cookieHeader
         )
         return MediaAccess(
             poToken: access.poToken,
@@ -848,6 +899,90 @@ final class VideoResolver {
     private static func decodeJSONString(_ value: String) -> String? {
         let wrapped = "\"\(value)\""
         return try? JSONDecoder().decode(String.self, from: Data(wrapped.utf8))
+    }
+
+    private static func initialPlayerResponse(from html: String) -> [String: Any]? {
+        let markers = [
+            "ytInitialPlayerResponse =",
+            "ytInitialPlayerResponse=",
+            "window[\"ytInitialPlayerResponse\"] ="
+        ]
+        for marker in markers {
+            var searchStart = html.startIndex
+            while searchStart < html.endIndex,
+                  let markerRange = html.range(
+                    of: marker,
+                    range: searchStart..<html.endIndex
+                  ) {
+                var objectStart = markerRange.upperBound
+                while objectStart < html.endIndex, html[objectStart].isWhitespace {
+                    objectStart = html.index(after: objectStart)
+                }
+                guard objectStart < html.endIndex, html[objectStart] == "{" else {
+                    searchStart = markerRange.upperBound
+                    continue
+                }
+
+                var depth = 0
+                var inString = false
+                var escaped = false
+                var index = objectStart
+                while index < html.endIndex {
+                    let character = html[index]
+                    if inString {
+                        if escaped {
+                            escaped = false
+                        } else if character == "\\" {
+                            escaped = true
+                        } else if character == "\"" {
+                            inString = false
+                        }
+                    } else if character == "\"" {
+                        inString = true
+                    } else if character == "{" {
+                        depth += 1
+                    } else if character == "}" {
+                        depth -= 1
+                        if depth == 0 {
+                            let end = html.index(after: index)
+                            let data = Data(html[objectStart..<end].utf8)
+                            if let decoded = try? JSONSerialization.jsonObject(with: data),
+                               let object = decoded as? [String: Any] {
+                                return object
+                            }
+                            break
+                        }
+                    }
+                    index = html.index(after: index)
+                }
+                searchStart = markerRange.upperBound
+            }
+        }
+        return nil
+    }
+
+    private static func playabilityReason(_ playability: [String: Any]?) -> String? {
+        guard let playability else { return nil }
+        var messages: [String] = []
+        if let reason = playability["reason"] as? String, !reason.isEmpty {
+            messages.append(reason)
+        }
+        if let renderer = (playability["errorScreen"] as? [String: Any])?["playerErrorMessageRenderer"] as? [String: Any] {
+            for key in ["reason", "subreason"] {
+                guard let value = renderer[key] as? [String: Any] else { continue }
+                if let simpleText = value["simpleText"] as? String, !simpleText.isEmpty {
+                    messages.append(simpleText)
+                }
+                if let runs = value["runs"] as? [[String: Any]] {
+                    let text = runs.compactMap { $0["text"] as? String }.joined()
+                    if !text.isEmpty { messages.append(text) }
+                }
+            }
+        }
+        let unique = messages.reduce(into: [String]()) { result, message in
+            if !result.contains(message) { result.append(message) }
+        }
+        return unique.isEmpty ? nil : unique.joined(separator: " | ")
     }
 
     private static func sessionContext(from html: String) -> SessionContext {

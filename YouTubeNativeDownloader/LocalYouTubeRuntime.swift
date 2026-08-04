@@ -180,6 +180,47 @@ final class LocalYouTubeRuntime: NSObject, WKNavigationDelegate {
         }
     }
 
+    func pageData(url: URL, cookieHeader: String) async throws -> Data {
+        try await prepareIfNeeded()
+        guard let webView else {
+            throw Self.runtimeError("本机 YouTube 运行环境没有启动")
+        }
+        try await installCookies(cookieHeader, in: webView.configuration.websiteDataStore.httpCookieStore)
+
+        let script = """
+        const response = await fetch(pageURL, {
+            method: 'GET',
+            credentials: 'include',
+            cache: 'no-store',
+            headers: { 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.7' }
+        });
+        return { status: response.status, text: await response.text() };
+        """
+
+        do {
+            let value = try await webView.callAsyncJavaScript(
+                script,
+                arguments: ["pageURL": url.absoluteString],
+                in: nil,
+                contentWorld: .page
+            )
+            guard let result = value as? [String: Any],
+                  let status = (result["status"] as? NSNumber)?.intValue,
+                  let text = result["text"] as? String,
+                  let data = text.data(using: .utf8) else {
+                throw Self.runtimeError("WebKit 页面返回格式错误")
+            }
+            guard (200...299).contains(status) else {
+                throw Self.runtimeError("WebKit 页面返回 HTTP \(status)")
+            }
+            DiagnosticLogger.shared.info("WebKit 页面响应; HTTP=\(status); bytes=\(data.count)")
+            return data
+        } catch {
+            DiagnosticLogger.shared.error(error, stage: "WebKit 读取 YouTube 页面")
+            throw error
+        }
+    }
+
     func testCookie(_ cookieHeader: String) async throws -> LocalCookieTestResult {
         let normalizedHeader = YouTubeCookieStore.normalizedCookieHeader(cookieHeader)
         guard !normalizedHeader.isEmpty else {

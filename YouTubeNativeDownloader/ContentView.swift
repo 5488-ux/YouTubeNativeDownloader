@@ -660,8 +660,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "4.6"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "25"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "4.7"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "26"
         return "\(version) (\(build))"
     }
 }
@@ -779,6 +779,17 @@ private struct ReleaseNote: Identifiable {
     var id: String { version }
 
     static let all: [ReleaseNote] = [
+        ReleaseNote(
+            version: "4.7",
+            title: "修复有效 Cookie 仍无法解析",
+            changes: [
+                "优先读取 YouTube 网页同一登录会话已经返回的 Player 响应，不再无脑重复请求。",
+                "从网页或播放器脚本提取 signatureTimestamp，并完整写入 Innertube 播放上下文。",
+                "按当前 yt-dlp 规则使用 TV Downgraded 与 Web Safari 客户端顺序，修正 Embedded 上下文。",
+                "Player 请求不再强塞非必需 PO Token；GVS Token 改为绑定账号 User Session ID。",
+                "生成 GVS Token 时保留同一套 Cookie，避免拿登录会话 ID 配匿名 BotGuard 会话。"
+            ]
+        ),
         ReleaseNote(
             version: "4.6",
             title: "修复本机运行时与 Cookie 自检",

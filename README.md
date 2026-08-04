@@ -1,8 +1,8 @@
 # 本地下载器 iOS
 
-原生 SwiftUI YouTube 下载器，支持 iOS 16.1 及以上版本（含 iOS 26）。4.6 已修复本机 WebKit 参数冲突，并加入由 iPhone 直连 YouTube 的 Cookie 登录状态测试。App 不调用自建解析、授权或媒体中转接口。
+原生 SwiftUI YouTube 下载器，支持 iOS 16.1 及以上版本（含 iOS 26）。4.7 按当前 yt-dlp 流程优先使用网页 Player 响应，并补齐播放器 STS 与正确的 GVS 会话绑定。App 不调用自建解析、授权或媒体中转接口。
 
-## 4.6 功能
+## 4.7 功能
 
 - 支持普通 YouTube、`youtu.be`、Shorts、Embed 和 Live 链接。
 - 支持最佳画质、1080P、720P、480P，优先选择 iPhone 兼容的 H.264 视频与 AAC 音频。
