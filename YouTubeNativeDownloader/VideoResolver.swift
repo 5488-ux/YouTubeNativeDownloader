@@ -99,7 +99,7 @@ final class VideoResolver {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
-        request.setValue("YouTubeNativeDownloader/5.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("YouTubeNativeDownloader/5.1", forHTTPHeaderField: "User-Agent")
         request.httpBody = try JSONEncoder().encode(ResolveRequest(
             url: urlText.trimmingCharacters(in: .whitespacesAndNewlines),
             kind: kind.apiValue,

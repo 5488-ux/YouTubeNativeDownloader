@@ -9,7 +9,7 @@ struct DownloadLiveActivity: Widget {
                 HStack {
                     Image(systemName: "arrow.down.circle.fill")
                         .foregroundStyle(.blue)
-                    Text(context.attributes.title)
+                    Text(context.state.titleText)
                         .font(.headline)
                         .foregroundStyle(Color.black.opacity(0.88))
                         .lineLimit(1)
@@ -18,8 +18,13 @@ struct DownloadLiveActivity: Widget {
                         .font(.system(.subheadline, design: .monospaced).bold())
                         .foregroundStyle(Color.black.opacity(0.88))
                 }
-                ProgressView(value: context.state.progress)
-                    .tint(.blue)
+                VStack(spacing: 7) {
+                    stageRow("服务器解析", value: context.state.resolveProgress, color: .blue)
+                    if context.attributes.kind != "音频 M4A" {
+                        stageRow("下载视频", value: context.state.videoProgress, color: .indigo)
+                    }
+                    stageRow("下载 AAC", value: context.state.audioProgress, color: .cyan)
+                }
                 HStack {
                     Text(context.state.speedText)
                     Spacer()
@@ -43,14 +48,17 @@ struct DownloadLiveActivity: Widget {
                         .font(.system(.headline, design: .monospaced))
                 }
                 DynamicIslandExpandedRegion(.center) {
-                    Text(context.attributes.title)
+                    Text(context.state.titleText)
                         .lineLimit(1)
                         .font(.headline)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(spacing: 6) {
-                        ProgressView(value: context.state.progress)
-                            .tint(.blue)
+                    VStack(spacing: 7) {
+                        stageRow("服务器解析", value: context.state.resolveProgress, color: .blue)
+                        if context.attributes.kind != "音频 M4A" {
+                            stageRow("下载视频", value: context.state.videoProgress, color: .indigo)
+                        }
+                        stageRow("下载 AAC", value: context.state.audioProgress, color: .cyan)
                         HStack {
                             Text(context.state.speedText)
                             Spacer()
@@ -77,6 +85,21 @@ struct DownloadLiveActivity: Widget {
             }
             .widgetURL(URL(string: "ytlocal://downloads"))
             .keylineTint(.blue)
+        }
+    }
+
+    @ViewBuilder
+    private func stageRow(_ title: String, value: Double, color: Color) -> some View {
+        VStack(spacing: 3) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text("\(Int(min(max(value, 0), 1) * 100))%")
+                    .monospacedDigit()
+            }
+            .font(.caption2.weight(.semibold))
+            ProgressView(value: min(max(value, 0), 1))
+                .tint(color)
         }
     }
 }

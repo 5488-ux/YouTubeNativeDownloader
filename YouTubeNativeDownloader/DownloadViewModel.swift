@@ -53,6 +53,7 @@ final class DownloadViewModel: ObservableObject {
     private let resolver = VideoResolver()
     private var lastActivityUpdate = Date.distantPast
     private var resolverProgressTask: Task<Void, Never>?
+    private var activityTitle = "YouTube 下载任务"
 
     init() {
         let defaults = UserDefaults.standard
@@ -61,6 +62,8 @@ final class DownloadViewModel: ObservableObject {
         allowsCellular = defaults.object(forKey: Keys.allowsCellular) as? Bool ?? true
         notificationsEnabled = defaults.object(forKey: Keys.notificationsEnabled) as? Bool ?? true
         liveActivityEnabled = defaults.object(forKey: Keys.liveActivityEnabled) as? Bool ?? true
+        NotificationManager.configure()
+        DownloadActivityManager.shared.dismissAll()
         refreshFiles()
         if notificationsEnabled { NotificationManager.requestAuthorization() }
     }
@@ -93,8 +96,15 @@ final class DownloadViewModel: ObservableObject {
         etaText = "--"
         transferredText = "--"
         statusText = "服务器正在解析格式"
+        activityTitle = "YouTube 下载任务"
         activePhase = .resolving
         startResolverProgress()
+        DownloadActivityManager.shared.start(
+            title: activityTitle,
+            kind: kind.rawValue,
+            enabled: liveActivityEnabled
+        )
+        updateActivity(force: true)
         DiagnosticLogger.shared.beginSession(
             urlText: urlText,
             endpoint: endpoint,
@@ -112,12 +122,9 @@ final class DownloadViewModel: ObservableObject {
                     endpoint: endpoint
                 )
                 stopResolverProgress(completed: true)
+                activityTitle = media.title
+                updateActivity(force: true)
                 DiagnosticLogger.shared.info("解析成功; videoID=\(media.videoID); title=\(media.title)")
-                DownloadActivityManager.shared.start(
-                    title: media.title,
-                    kind: kind.rawValue,
-                    enabled: liveActivityEnabled
-                )
 
                 let output: URL
                 switch kind {
@@ -140,6 +147,7 @@ final class DownloadViewModel: ObservableObject {
                         }
                     }
                     videoProgress = 1
+                    updateActivity(force: true)
 
                     statusText = "下载 AAC 音频"
                     activePhase = .downloadingAudio
@@ -152,6 +160,7 @@ final class DownloadViewModel: ObservableObject {
                         }
                     }
                     audioProgress = 1
+                    updateActivity(force: true)
 
                     statusText = "FFmpeg 正在合并 MP4"
                     activePhase = .converting
@@ -201,6 +210,7 @@ final class DownloadViewModel: ObservableObject {
                         }
                     }
                     audioProgress = 1
+                    updateActivity(force: true)
                     output = try MediaFileBuilder.saveAudio(sourceURL: audioFile, title: media.title)
                     DiagnosticLogger.shared.info("音频保存完成; file=\(output.lastPathComponent); bytes=\(fileBytes(output))")
                 }
@@ -276,6 +286,8 @@ final class DownloadViewModel: ObservableObject {
                 guard !Task.isCancelled, let self else { return }
                 let remaining = max(0, 0.92 - self.resolveProgress)
                 self.resolveProgress = min(0.92, self.resolveProgress + max(0.012, remaining * 0.14))
+                self.statusText = "服务器正在解析格式"
+                self.updateActivity(force: false)
             }
         }
     }
@@ -353,9 +365,13 @@ final class DownloadViewModel: ObservableObject {
         lastActivityUpdate = now
         DownloadActivityManager.shared.update(
             progress: progress,
+            resolveProgress: resolveProgress,
+            videoProgress: videoProgress,
+            audioProgress: audioProgress,
             speedText: speedText,
             etaText: etaText,
-            statusText: statusText
+            statusText: statusText,
+            titleText: activityTitle
         )
     }
 

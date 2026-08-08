@@ -643,8 +643,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "5.0"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "27"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "5.1"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "28"
         return "\(version) (\(build))"
     }
 }
@@ -657,6 +657,17 @@ private struct ReleaseNote: Identifiable {
     var id: String { version }
 
     static let all: [ReleaseNote] = [
+        ReleaseNote(
+            version: "5.1",
+            title: "修复灵动岛、锁屏进度与下载通知",
+            changes: [
+                "灵动岛展开视图和锁屏实时活动改为服务器解析、视频下载、AAC 下载三条独立进度。",
+                "实时活动在解析请求发出前创建，服务器解析进度不再缺失。",
+                "下载完成或失败后使用立即移除策略，并清理旧版本遗留的实时活动。",
+                "修复 App 在前台时下载完成通知不显示横幅的问题，并记录通知授权与投递错误。",
+                "音频任务自动隐藏无意义的视频进度，只显示服务器解析与 AAC 下载。"
+            ]
+        ),
         ReleaseNote(
             version: "5.0",
             title: "恢复服务器解析，手机只负责下载",
