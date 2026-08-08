@@ -643,8 +643,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "5.1"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "28"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "5.2"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "29"
         return "\(version) (\(build))"
     }
 }
@@ -657,6 +657,16 @@ private struct ReleaseNote: Identifiable {
     var id: String { version }
 
     static let all: [ReleaseNote] = [
+        ReleaseNote(
+            version: "5.2",
+            title: "后台下载自动恢复",
+            changes: [
+                "后台连接中断时优先使用 iOS 断点数据自动续传。",
+                "主媒体地址失败后自动切换服务器返回的备用地址。",
+                "临时链接整体失效时自动重新请求解析服务器，刷新视频或 AAC 地址后继续下载。",
+                "App 位于前台时增加普通 URLSession 兜底，并把每次恢复过程写入诊断日志。"
+            ]
+        ),
         ReleaseNote(
             version: "5.1",
             title: "修复灵动岛、锁屏进度与下载通知",

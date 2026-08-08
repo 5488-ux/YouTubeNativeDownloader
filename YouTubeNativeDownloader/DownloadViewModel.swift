@@ -140,7 +140,9 @@ final class DownloadViewModel: ObservableObject {
                     activePhase = .downloadingVideo
                     DiagnosticLogger.shared.info("开始下载视频; \(sourceDescription(video))")
                     let videoFile = try await downloadDirect(
-                        source: video
+                        source: video,
+                        mediaRole: .video,
+                        endpoint: endpoint
                     ) { [weak self] value in
                         Task { @MainActor in
                             self?.applyProgress(value, offset: 0, weight: videoWeight, phase: "下载视频")
@@ -153,7 +155,9 @@ final class DownloadViewModel: ObservableObject {
                     activePhase = .downloadingAudio
                     DiagnosticLogger.shared.info("开始下载音频; \(sourceDescription(media.audio))")
                     let audioFile = try await downloadDirect(
-                        source: media.audio
+                        source: media.audio,
+                        mediaRole: .audio,
+                        endpoint: endpoint
                     ) { [weak self] value in
                         Task { @MainActor in
                             self?.applyProgress(value, offset: videoWeight, weight: audioWeight, phase: "下载音频")
@@ -203,7 +207,9 @@ final class DownloadViewModel: ObservableObject {
                     activePhase = .downloadingAudio
                     DiagnosticLogger.shared.info("开始下载音频; \(sourceDescription(media.audio))")
                     let audioFile = try await downloadDirect(
-                        source: media.audio
+                        source: media.audio,
+                        mediaRole: .audio,
+                        endpoint: endpoint
                     ) { [weak self] value in
                         Task { @MainActor in
                             self?.applyProgress(value, offset: 0, weight: 0.98, phase: "下载音频")
@@ -350,12 +356,123 @@ final class DownloadViewModel: ObservableObject {
 
     private func downloadDirect(
         source: MediaSource,
+        mediaRole: DownloadMediaRole,
+        endpoint: URL,
         progress: @escaping @Sendable (TransferProgress) -> Void
     ) async throws -> URL {
-        try await DownloadTransfer().download(
-            source: source,
-            allowsCellular: allowsCellular,
-            progress: progress
+        do {
+            return try await downloadWithFallbacks(source: source, progress: progress)
+        } catch {
+            DiagnosticLogger.shared.error(error, stage: "后台下载恢复失败，准备刷新临时链接")
+            statusText = "下载连接失效，服务器重新解析"
+            activePhase = .resolving
+            resolveProgress = 0.04
+            startResolverProgress()
+            updateActivity(force: true)
+
+            let refreshedMedia: ResolvedMedia
+            do {
+                refreshedMedia = try await resolver.resolve(
+                    urlText: urlText,
+                    quality: quality,
+                    kind: kind,
+                    endpoint: endpoint
+                )
+                stopResolverProgress(completed: true)
+            } catch {
+                stopResolverProgress(completed: false)
+                throw error
+            }
+
+            activityTitle = refreshedMedia.title
+            let refreshedSource: MediaSource
+            switch mediaRole {
+            case .video:
+                guard let video = refreshedMedia.video else {
+                    throw DownloaderError.noCompatibleVideo
+                }
+                refreshedSource = video
+                activePhase = .downloadingVideo
+                statusText = resolutionText(video) + " · 重新下载视频"
+            case .audio:
+                refreshedSource = refreshedMedia.audio
+                activePhase = .downloadingAudio
+                statusText = "重新下载 AAC 音频"
+            }
+            updateActivity(force: true)
+            DiagnosticLogger.shared.info(
+                "服务器已刷新临时媒体地址; role=\(mediaRole.rawValue); " +
+                "host=\(refreshedSource.url.host ?? "unknown")"
+            )
+            return try await downloadWithFallbacks(source: refreshedSource, progress: progress)
+        }
+    }
+
+    private func downloadWithFallbacks(
+        source: MediaSource,
+        progress: @escaping @Sendable (TransferProgress) -> Void
+    ) async throws -> URL {
+        var candidates = [source]
+        if let fallbackURL = source.fallbackURL,
+           fallbackURL != source.url {
+            candidates.append(copySource(source, replacingURL: fallbackURL))
+        }
+
+        var lastError: Error = DownloaderError.downloadFailed
+        for (index, candidate) in candidates.enumerated() {
+            do {
+                if index > 0 {
+                    DiagnosticLogger.shared.warning(
+                        "切换备用下载地址; host=\(candidate.url.host ?? "unknown")"
+                    )
+                }
+                return try await DownloadTransfer().download(
+                    source: candidate,
+                    allowsCellular: allowsCellular,
+                    mode: .background,
+                    progress: progress
+                )
+            } catch {
+                lastError = error
+                DiagnosticLogger.shared.error(
+                    error,
+                    stage: index == 0 ? "主后台下载失败" : "备用后台下载失败"
+                )
+            }
+        }
+
+        if UIApplication.shared.applicationState == .active {
+            for candidate in candidates.reversed() {
+                do {
+                    DiagnosticLogger.shared.warning(
+                        "后台会话均失败，切换前台下载兜底; host=\(candidate.url.host ?? "unknown")"
+                    )
+                    return try await DownloadTransfer().download(
+                        source: candidate,
+                        allowsCellular: allowsCellular,
+                        mode: .foreground,
+                        progress: progress
+                    )
+                } catch {
+                    lastError = error
+                    DiagnosticLogger.shared.error(error, stage: "前台下载兜底失败")
+                }
+            }
+        }
+        throw lastError
+    }
+
+    private func copySource(_ source: MediaSource, replacingURL url: URL) -> MediaSource {
+        MediaSource(
+            url: url,
+            fallbackURL: nil,
+            httpHeaders: source.httpHeaders,
+            contentLength: source.contentLength,
+            codec: source.codec,
+            width: source.width,
+            height: source.height,
+            fps: source.fps,
+            bitrate: source.bitrate
         )
     }
 

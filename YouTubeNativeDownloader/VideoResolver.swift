@@ -18,6 +18,11 @@ struct ResolvedMedia: Sendable {
     let audio: MediaSource
 }
 
+enum DownloadMediaRole: String, Sendable {
+    case video = "video"
+    case audio = "audio"
+}
+
 enum DownloadKind: String, CaseIterable, Identifiable, Codable {
     case video = "视频 MP4"
     case audio = "音频 M4A"
@@ -99,7 +104,7 @@ final class VideoResolver {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
-        request.setValue("YouTubeNativeDownloader/5.1", forHTTPHeaderField: "User-Agent")
+        request.setValue("YouTubeNativeDownloader/5.2", forHTTPHeaderField: "User-Agent")
         request.httpBody = try JSONEncoder().encode(ResolveRequest(
             url: urlText.trimmingCharacters(in: .whitespacesAndNewlines),
             kind: kind.apiValue,

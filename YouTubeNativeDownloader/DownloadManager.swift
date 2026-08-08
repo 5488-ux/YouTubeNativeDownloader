@@ -28,6 +28,11 @@ struct TransferProgress: Sendable {
     let remainingSeconds: TimeInterval?
 }
 
+enum TransferSessionMode: String, Sendable {
+    case background = "后台"
+    case foreground = "前台兜底"
+}
+
 final class DownloadTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     private var continuation: CheckedContinuation<URL, Error>?
     private var progressHandler: (@Sendable (TransferProgress) -> Void)?
@@ -37,13 +42,18 @@ final class DownloadTransfer: NSObject, URLSessionDownloadDelegate, @unchecked S
     private var lastSampleBytes: Int64 = 0
     private var smoothedSpeed = 0.0
     private var session: URLSession?
+    private var didAttemptResume = false
 
     func download(
         source: MediaSource,
         allowsCellular: Bool,
+        mode: TransferSessionMode = .background,
         progress: @escaping @Sendable (TransferProgress) -> Void
     ) async throws -> URL {
-        DiagnosticLogger.shared.info("创建后台下载; host=\(source.url.host ?? "unknown"); expectedBytes=\(source.contentLength ?? 0); cellular=\(allowsCellular)")
+        DiagnosticLogger.shared.info(
+            "创建\(mode.rawValue)下载; host=\(source.url.host ?? "unknown"); " +
+            "expectedBytes=\(source.contentLength ?? 0); cellular=\(allowsCellular)"
+        )
         return try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
             self.progressHandler = progress
@@ -52,11 +62,17 @@ final class DownloadTransfer: NSObject, URLSessionDownloadDelegate, @unchecked S
             self.lastSampleDate = Date()
             self.lastSampleBytes = 0
             self.smoothedSpeed = 0
+            self.didAttemptResume = false
 
-            let identifier = "cn.local.YouTubeNativeDownloader.transfer.\(UUID().uuidString)"
-            let configuration = URLSessionConfiguration.background(withIdentifier: identifier)
+            let configuration: URLSessionConfiguration
+            if mode == .background {
+                let identifier = "cn.local.YouTubeNativeDownloader.transfer.\(UUID().uuidString)"
+                configuration = URLSessionConfiguration.background(withIdentifier: identifier)
+                configuration.sessionSendsLaunchEvents = true
+            } else {
+                configuration = URLSessionConfiguration.default
+            }
             configuration.isDiscretionary = false
-            configuration.sessionSendsLaunchEvents = true
             configuration.allowsCellularAccess = allowsCellular
             configuration.timeoutIntervalForRequest = 15
             configuration.timeoutIntervalForResource = 60 * 60 * 6
@@ -148,7 +164,18 @@ final class DownloadTransfer: NSObject, URLSessionDownloadDelegate, @unchecked S
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error {
+        if let error, continuation != nil {
+            let nsError = error as NSError
+            if !didAttemptResume,
+               let resumeData = nsError.userInfo[NSURLSessionDownloadTaskResumeData] as? Data,
+               !resumeData.isEmpty {
+                didAttemptResume = true
+                DiagnosticLogger.shared.warning(
+                    "后台下载中断，使用系统断点数据自动续传; bytes=\(resumeData.count)"
+                )
+                session.downloadTask(withResumeData: resumeData).resume()
+                return
+            }
             DiagnosticLogger.shared.error(error, stage: "后台下载 URLSession")
             finish(.failure(error))
         }
