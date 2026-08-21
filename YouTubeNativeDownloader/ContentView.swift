@@ -242,6 +242,21 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .disabled(model.isBusy)
 
+            HStack {
+                Label("音轨语言", systemImage: "waveform.badge.mic")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Picker("音轨语言", selection: $model.audioLanguage) {
+                    ForEach(AudioLanguage.allCases) { language in
+                        Text(language.title).tag(language)
+                    }
+                }
+                .pickerStyle(.menu)
+                .disabled(model.isBusy)
+            }
+            .padding(13)
+            .background(.white.opacity(0.58), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+
             if model.kind == .video {
                 HStack {
                     Label("视频画质", systemImage: "sparkles.tv")
@@ -526,6 +541,18 @@ private struct SettingsView: View {
                 }
 
                 Section {
+                    Picker("音轨语言", selection: $model.audioLanguage) {
+                        ForEach(AudioLanguage.allCases) { language in
+                            Text(language.title).tag(language)
+                        }
+                    }
+                } header: {
+                    Text("默认音轨")
+                } footer: {
+                    Text("默认优先使用视频原始音轨，其次使用英语；只有手动选择其他语言时才会下载对应配音，避免随机出现阿拉伯语或韩语。")
+                }
+
+                Section {
                     HStack(spacing: 12) {
                         Image(systemName: ffmpeg.isInstalled ? "checkmark.seal.fill" : "shippingbox")
                             .foregroundStyle(ffmpeg.isInstalled ? Color.green : Color.indigo)
@@ -643,8 +670,8 @@ private struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "5.2"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "29"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "5.3"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "30"
         return "\(version) (\(build))"
     }
 }
@@ -657,6 +684,16 @@ private struct ReleaseNote: Identifiable {
     var id: String { version }
 
     static let all: [ReleaseNote] = [
+        ReleaseNote(
+            version: "5.3",
+            title: "固定 YouTube 音轨语言",
+            changes: [
+                "下载页和设置新增音轨语言选择，并永久保存用户选择。",
+                "默认优先使用视频原始音轨，其次使用英语，不再随机下载阿拉伯语或韩语配音。",
+                "支持手动选择英语、中文、日语、韩语和阿拉伯语音轨。",
+                "诊断日志新增服务器实际返回的音轨语言和格式说明。"
+            ]
+        ),
         ReleaseNote(
             version: "5.2",
             title: "后台下载自动恢复",

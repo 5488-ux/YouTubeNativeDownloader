@@ -18,6 +18,9 @@ final class DownloadViewModel: ObservableObject {
     @Published var urlText = ""
     @Published var kind: DownloadKind = .video
     @Published var quality: VideoQuality = .best
+    @Published var audioLanguage: AudioLanguage {
+        didSet { UserDefaults.standard.set(audioLanguage.rawValue, forKey: Keys.audioLanguage) }
+    }
     @Published private(set) var isBusy = false
     @Published private(set) var progress = 0.0
     @Published private(set) var resolveProgress = 0.0
@@ -57,6 +60,8 @@ final class DownloadViewModel: ObservableObject {
 
     init() {
         let defaults = UserDefaults.standard
+        audioLanguage = AudioLanguage(rawValue: defaults.string(forKey: Keys.audioLanguage) ?? "")
+            ?? .originalEnglish
         serverURL = defaults.string(forKey: Keys.serverURL)
             ?? "https://youtube.789113.cn/ios-api/resolve"
         allowsCellular = defaults.object(forKey: Keys.allowsCellular) as? Bool ?? true
@@ -111,7 +116,7 @@ final class DownloadViewModel: ObservableObject {
             kind: kind,
             quality: quality
         )
-        DiagnosticLogger.shared.info("开始请求解析服务器")
+        DiagnosticLogger.shared.info("开始请求解析服务器; audioLanguage=\(audioLanguage.apiValue)")
 
         Task {
             do {
@@ -119,6 +124,7 @@ final class DownloadViewModel: ObservableObject {
                     urlText: urlText,
                     quality: quality,
                     kind: kind,
+                    audioLanguage: audioLanguage,
                     endpoint: endpoint
                 )
                 stopResolverProgress(completed: true)
@@ -376,6 +382,7 @@ final class DownloadViewModel: ObservableObject {
                     urlText: urlText,
                     quality: quality,
                     kind: kind,
+                    audioLanguage: audioLanguage,
                     endpoint: endpoint
                 )
                 stopResolverProgress(completed: true)
@@ -472,7 +479,9 @@ final class DownloadViewModel: ObservableObject {
             width: source.width,
             height: source.height,
             fps: source.fps,
-            bitrate: source.bitrate
+            bitrate: source.bitrate,
+            language: source.language,
+            formatNote: source.formatNote
         )
     }
 
@@ -503,7 +512,9 @@ final class DownloadViewModel: ObservableObject {
         let resolution = source.width.flatMap { width in
             source.height.map { "\(width)x\($0)" }
         } ?? "audio"
-        return "host=\(source.url.host ?? "unknown"); codec=\(source.codec); resolution=\(resolution); bytes=\(size); direct=true"
+        let language = source.language ?? "unknown"
+        let formatNote = source.formatNote ?? "none"
+        return "host=\(source.url.host ?? "unknown"); codec=\(source.codec); resolution=\(resolution); bytes=\(size); language=\(language); note=\(formatNote); direct=true"
     }
 
     private func fileBytes(_ url: URL) -> Int {
@@ -564,6 +575,7 @@ final class DownloadViewModel: ObservableObject {
 
     private enum Keys {
         static let serverURL = "settings.serverURL"
+        static let audioLanguage = "settings.audioLanguage"
         static let allowsCellular = "settings.allowsCellular"
         static let notificationsEnabled = "settings.notificationsEnabled"
         static let liveActivityEnabled = "settings.liveActivityEnabled"
