@@ -10,6 +10,8 @@ struct MediaSource: Sendable {
     let height: Int?
     let fps: Int?
     let bitrate: Int?
+    let language: String?
+    let formatNote: String?
 }
 struct ResolvedMedia: Sendable {
     let title: String
@@ -49,10 +51,40 @@ enum VideoQuality: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+enum AudioLanguage: String, CaseIterable, Identifiable, Codable {
+    case originalEnglish = "original_en"
+    case english = "en"
+    case chinese = "zh"
+    case japanese = "ja"
+    case korean = "ko"
+    case arabic = "ar"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .originalEnglish: return "原始音轨 / English"
+        case .english: return "English"
+        case .chinese: return "中文"
+        case .japanese: return "日本語"
+        case .korean: return "한국어"
+        case .arabic: return "العربية"
+        }
+    }
+
+    var apiValue: String { rawValue }
+}
+
 private struct ResolveRequest: Encodable {
     let url: String
     let kind: String
     let quality: String
+    let audioLanguage: String
+
+    enum CodingKeys: String, CodingKey {
+        case url, kind, quality
+        case audioLanguage = "audio_language"
+    }
 }
 
 private struct ResolveResponse: Decodable {
@@ -79,12 +111,15 @@ private struct SourceResponse: Decodable {
     let height: Int?
     let fps: Int?
     let bitrate: Int?
+    let language: String?
+    let formatNote: String?
 
     enum CodingKeys: String, CodingKey {
-        case url, codec, width, height, fps, bitrate
+        case url, codec, width, height, fps, bitrate, language
         case fallbackURL = "fallback_url"
         case httpHeaders = "http_headers"
         case contentLength = "content_length"
+        case formatNote = "format_note"
     }
 }
 
@@ -93,6 +128,7 @@ final class VideoResolver {
         urlText: String,
         quality: VideoQuality,
         kind: DownloadKind,
+        audioLanguage: AudioLanguage,
         endpoint: URL
     ) async throws -> ResolvedMedia {
         _ = try Self.extractVideoID(from: urlText)
@@ -104,11 +140,12 @@ final class VideoResolver {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
-        request.setValue("YouTubeNativeDownloader/5.2", forHTTPHeaderField: "User-Agent")
+        request.setValue("YouTubeNativeDownloader/5.3", forHTTPHeaderField: "User-Agent")
         request.httpBody = try JSONEncoder().encode(ResolveRequest(
             url: urlText.trimmingCharacters(in: .whitespacesAndNewlines),
             kind: kind.apiValue,
-            quality: quality.apiValue
+            quality: quality.apiValue,
+            audioLanguage: audioLanguage.apiValue
         ))
         DiagnosticLogger.shared.info("解析请求已创建; timeout=75s; maxAttempts=3")
 
@@ -258,7 +295,9 @@ final class VideoResolver {
             width: source.width,
             height: source.height,
             fps: source.fps,
-            bitrate: source.bitrate
+            bitrate: source.bitrate,
+            language: source.language,
+            formatNote: source.formatNote
         )
     }
 
