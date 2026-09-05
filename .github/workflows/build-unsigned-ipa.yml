@@ -16,7 +16,7 @@ concurrency:
 jobs:
   build:
     name: Build iPhone app
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
 
     steps:
@@ -40,12 +40,15 @@ jobs:
       - name: Enforce iOS 26 deployment target
         run: |
           set -euxo pipefail
-          xcodebuild -showBuildSettings \
-            -project "$GITHUB_WORKSPACE/YouTubeNativeDownloader.xcodeproj" \
-            -scheme "YouTubeNativeDownloader" \
-            -configuration Release \
-            | tee "$RUNNER_TEMP/build-settings.txt"
-          test "$(grep -c 'IPHONEOS_DEPLOYMENT_TARGET = 26.0' "$RUNNER_TEMP/build-settings.txt")" -ge 2
+          for target in YouTubeNativeDownloader DownloadLiveActivity; do
+            xcodebuild -showBuildSettings \
+              -project "$GITHUB_WORKSPACE/YouTubeNativeDownloader.xcodeproj" \
+              -target "$target" \
+              -configuration Release \
+              -sdk iphoneos \
+              | tee "$RUNNER_TEMP/build-settings-$target.txt"
+            grep -F 'IPHONEOS_DEPLOYMENT_TARGET = 26.0' "$RUNNER_TEMP/build-settings-$target.txt"
+          done
 
       - name: Build unsigned iPhone app
         run: |
